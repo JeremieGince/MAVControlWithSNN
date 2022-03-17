@@ -1,2 +1,4 @@
 mlagents_envs==0.27.0
+mlagents==0.27.0
+gym_unity==0.27.0
 numpy==1.22.2
