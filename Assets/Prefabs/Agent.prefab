@@ -190,7 +190,7 @@ MonoBehaviour:
   rotorFR: {fileID: 6450435573677812395}
   rotorBL: {fileID: 5728254497855178056}
   rotorBR: {fileID: 8578250801884175486}
-  useForceRatio: 1
+  useForceRatio: 0
   properlersForce: 100
   reachGoalMaterial: {fileID: 2100000, guid: 5e1bdb55ccb3429418f3f0bc6a016a0f, type: 2}
   halfWinMaterial: {fileID: 2100000, guid: a26b69cfd25bb8f4a94baf5360b8597e, type: 2}
