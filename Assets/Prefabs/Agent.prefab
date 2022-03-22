@@ -155,7 +155,7 @@ MonoBehaviour:
     VectorActionSpaceType: 1
     hasUpgradedBrainParametersWithActionSpec: 1
   m_Model: {fileID: 0}
-  m_InferenceDevice: 2
+  m_InferenceDevice: 0
   m_BehaviorType: 0
   m_BehaviorName: Landing
   TeamId: 0
@@ -178,25 +178,28 @@ MonoBehaviour:
     maxStep: 0
   hasUpgradedFromAgentParameters: 1
   MaxStep: 0
-  stepRewardFactor: -1
-  reachGoalReward: 100
-  hitWallReward: -100
+  stepRewardFactor: 1
+  reachGoalReward: 1
+  hitWallReward: -1
   enableTorque: 0
   enableDisplacement: 0
+  enableDivergence: 1
   divergenceSetPoint: 1
   droneMinStartY: 5
-  droneMaxStartY: 25
+  droneMaxStartY: 5
+  useYAxisAsParameter: 1
   rotorFL: {fileID: 5287388596100599559}
   rotorFR: {fileID: 6450435573677812395}
   rotorBL: {fileID: 5728254497855178056}
   rotorBR: {fileID: 8578250801884175486}
-  useForceRatio: 0
-  properlersForce: 100
+  useForceRatio: 1
+  properlersForce: 20
   reachGoalMaterial: {fileID: 2100000, guid: 5e1bdb55ccb3429418f3f0bc6a016a0f, type: 2}
   halfWinMaterial: {fileID: 2100000, guid: a26b69cfd25bb8f4a94baf5360b8597e, type: 2}
   hitWallMaterial: {fileID: 2100000, guid: 4eb0186bea279bb4e91ecc1449cc73ea, type: 2}
   defaultMaterial: {fileID: 2100000, guid: e9fbe82e78eb92a4387ddd575755eeda, type: 2}
   floorMeshRenderer: {fileID: 0}
+  ceilling: {fileID: 0}
   targetTransform: {fileID: 0}
   opticalFlowCamera: {fileID: 7927477370396042924}
   constForce: 0
@@ -217,7 +220,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   DecisionPeriod: 5
-  TakeActionsBetweenDecisions: 1
+  TakeActionsBetweenDecisions: 0
 --- !u!1 &2900304642488627260
 GameObject:
   m_ObjectHideFlags: 0
