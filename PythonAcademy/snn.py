@@ -58,9 +58,16 @@ class SNN(torch.nn.Module):
 		self.forward_func = self.get_forward_func(forward_mth)
 		self.readout_func = self.get_readout_func(readout_mth)
 
+		# TODO: split the inputs to two sets: spikes and currents. En utilisant le specs, on peut changer
+		#  l'architecture du snn afin d'être en mesure de bien gérer les inputs. Les inputs de style onHot
+		#  devraient être des entrée de formes spikes et les entrées de forment continue devraient être envoyer
+		#  sous forme de courant. Idéalement les entrées sous forme d'image devraient être traité par un conv snn.
+		#  Il devrait avoir autant de layer d'entrés que de sensor (len(self.spec.observation_specs)). Ces layers
+		#  d'entrées devraient output sur une même hidden layer.
+
 	@property
 	def inputs_size(self):
-		return len(self.spec.observation_specs)
+		return sum([np.prod(entry.shape) for entry in self.spec.observation_specs])
 
 	@property
 	def output_size(self):
@@ -207,7 +214,7 @@ class SNN(torch.nn.Module):
 				out = self.spike_func(forward_membrane_potentials[ell])
 				spikes[ell] = out.detach()
 
-	def obs_to_spikes(self, obs):
+	def obs_to_inputs(self, obs):
 		"""
 
 		:param obs: shape: (observation_size, nb_agents, )
@@ -310,7 +317,7 @@ class SNN(torch.nn.Module):
 				# Store the observation as the new "last observation"
 				dict_last_obs_from_agent[agent_id_decisions] = decision_steps[agent_id_decisions].obs[0]
 
-			env.set_actions(behavior_name, self.get_action(self.obs_to_spikes(decision_steps.obs[0]), epsilon))
+			env.set_actions(behavior_name, self.get_action(self.obs_to_inputs(decision_steps.obs), epsilon))
 			# Perform a step in the simulation
 			env.step()
 		return buffer, np.mean(cumulative_rewards)
