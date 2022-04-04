@@ -468,6 +468,7 @@ class SNN(torch.nn.Module):
 
 
 if __name__ == '__main__':
+	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
 	env = UnityEnvironment(file_name=None, seed=42, side_channels=[])
 	env.reset()
 	snn = SNN(spec=env.behavior_specs[list(env.behavior_specs)[0]])
