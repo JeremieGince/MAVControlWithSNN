@@ -180,7 +180,7 @@ MonoBehaviour:
   agentParameters:
     maxStep: 0
   hasUpgradedFromAgentParameters: 1
-  MaxStep: 0
+  MaxStep: 100000
   stepRewardFactor: 0
   reachGoalReward: 1
   hitWallReward: -1
@@ -211,6 +211,7 @@ MonoBehaviour:
   floorMeshRenderer: {fileID: 0}
   divergenceCamera: {fileID: 6879515878935961948}
   neuromorphicCamera: {fileID: 0}
+  environmentScript: {fileID: 0}
   ceilling: {fileID: 0}
   targetTransform: {fileID: 0}
 --- !u!114 &5801483547754625033
