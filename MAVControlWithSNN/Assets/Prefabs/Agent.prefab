@@ -180,7 +180,7 @@ MonoBehaviour:
   agentParameters:
     maxStep: 0
   hasUpgradedFromAgentParameters: 1
-  MaxStep: 100000
+  MaxStep: 0
   stepRewardFactor: 0
   reachGoalReward: 1
   hitWallReward: -1
