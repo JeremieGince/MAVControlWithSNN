@@ -1,9 +1,9 @@
 import random
-from typing import Iterable, List, NamedTuple, Tuple, Union
+from typing import Any, Iterable, List, NamedTuple, Tuple, Union
 
 import numpy as np
 import torch
-from mlagents_envs.base_env import BehaviorSpec
+from mlagents_envs.base_env import ActionTuple, BehaviorSpec
 from poutyne import Model
 
 
@@ -16,11 +16,11 @@ class Experience(NamedTuple):
 	- Done flag
 	- Next Observation
 	"""
-	obs: np.ndarray
-	action: np.ndarray
+	obs: Any
+	action: ActionTuple
 	reward: float
 	done: bool
-	next_obs: np.ndarray
+	next_obs: Any
 
 
 Trajectory = List[Experience]

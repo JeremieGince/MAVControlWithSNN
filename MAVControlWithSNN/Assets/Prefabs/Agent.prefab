@@ -598,6 +598,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 7013142770708088529, guid: ba21d1f679cb8064fa0e23aa772ea603, type: 3}
+      propertyPath: observationStacks
+      value: 10
+      objectReference: {fileID: 0}
     - target: {fileID: 8606404825392833858, guid: ba21d1f679cb8064fa0e23aa772ea603, type: 3}
       propertyPath: m_Name
       value: NeuromorphicCamera

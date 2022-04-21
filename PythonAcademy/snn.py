@@ -1,28 +1,46 @@
 import json
 import os
-from typing import Any, Dict, Iterable, List, Tuple, Type, Union
+from copy import deepcopy
+from typing import Any, Callable, DefaultDict, Dict, Iterable, List, NamedTuple, Tuple, Type, Union
+from collections import defaultdict
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from mlagents_envs.environment import UnityEnvironment
 from torch import Tensor, nn
 import torch.nn.functional as F
-from mlagents_envs.base_env import ActionTuple, BehaviorSpec, BaseEnv
+from mlagents_envs.base_env import ActionTuple, BehaviorSpec, BaseEnv, DecisionSteps, DimensionProperty, TerminalSteps
 import enum
+
+from torchvision.transforms import ToTensor, Compose, Lambda
 
 from PythonAcademy.models.dqn import Experience, ReplayBuffer, Trajectory
 from PythonAcademy.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
-from PythonAcademy.spiking_layers import LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
+from PythonAcademy.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
 from PythonAcademy.utils import LossHistory, mapping_update_recursively
+
+
+class AgentsHistoryMaps:
+	"""
+	Class to store the mapping between agents and their history maps
+
+	Attributes:
+		trajectories (Dict[int, Trajectory]): Mapping between agent ids and their trajectories
+		last_obs (Dict[int, np.ndarray]): Mapping between agent ids and their last observations
+		last_action (Dict[int, np.ndarray]): Mapping between agent ids and their last actions
+		cumulative_reward (Dict[int, float]): Mapping between agent ids and their cumulative rewards
+	"""
+
+	def __init__(self):
+		self.trajectories: Dict[int, Trajectory] = defaultdict(list)
+		self.last_obs: Dict[int, Any] = defaultdict()
+		self.last_action: Dict[int, ActionTuple] = defaultdict()
+		self.cumulative_reward: Dict[int, float] = defaultdict(lambda: 0.0)
 
 
 class ReadoutMth(enum.Enum):
 	RNN = 0
-
-
-class ForwardMth(enum.Enum):
-	LAYER_THEN_TIME = 0
-	TIME_THEN_LAYER = 1
 
 
 class LoadCheckpointMode(enum.Enum):
@@ -50,14 +68,15 @@ class SNN(torch.nn.Module):
 	def __init__(
 			self,
 			spec: BehaviorSpec,
-			n_hidden_neurons: Iterable[int] = None,
+			n_hidden_neurons: Union[Iterable[int], int] = None,
 			use_recurrent_connection: Union[bool, Iterable[bool]] = True,
-			int_time_steps=100,
+			int_time_steps: int = None,
 			spike_func: Union[Type[SpikeFunction], SpikeFuncType] = HeavisideSigmoidApprox,
-			hidden_layer_type: Union[Type[LIFLayer], LayerType] = LIFLayer,
+			hidden_layer_type: Union[Type[LIFLayer], LayerType] = ALIFLayer,
 			device=None,
 			checkpoint_folder: str = "checkpoints",
 			model_name: str = "snn",
+			input_transform: Union[Dict[str, Callable], List[Callable]] = None,
 			**kwargs
 	):
 		super(SNN, self).__init__()
@@ -69,7 +88,7 @@ class SNN(torch.nn.Module):
 			self._set_default_device_()
 
 		self.dt = self.kwargs.get("dt", 1e-3)
-		self.int_time_steps = int_time_steps
+		self.int_time_steps = self._get_and_check_int_time_steps() if int_time_steps is None else int_time_steps
 		if isinstance(spike_func, SpikeFuncType):
 			spike_func = SpikeFuncType2Func[spike_func]
 		self.spike_func = spike_func
@@ -83,38 +102,96 @@ class SNN(torch.nn.Module):
 		if isinstance(n_hidden_neurons, int):
 			n_hidden_neurons = [n_hidden_neurons]
 		self.n_hidden_neurons = n_hidden_neurons if n_hidden_neurons is not None else []
+		if self.n_hidden_neurons:
+			self.first_hidden_sizes = self._dispatch_first_hidden_size()
 		self.use_recurrent_connection = use_recurrent_connection
+		self.input_layers = nn.ModuleDict()
 		self.layers = nn.ModuleDict()
 		self._add_layers_()
+		self.all_layer_names = list(self.input_layers.keys()) + list(self.layers.keys())
 		self.initialize_weights_()
 		self.loss_history = LossHistory()
 
-		# TODO: split the inputs to two sets: spikes and currents. En utilisant le specs, on peut changer
-		#  l'architecture du snn afin d'être en mesure de bien gérer les inputs. Les inputs de style onHot
-		#  devraient être des entrée de formes spikes et les entrées de forment continue devraient être envoyer
-		#  sous forme de courant. Idéalement les entrées sous forme d'image devraient être traité par un conv snn.
-		#  Il devrait avoir autant de layer d'entrés que de sensor (len(self.spec.observation_specs)). Ces layers
-		#  d'entrées devraient output sur une même hidden layer.
+		if input_transform is None:
+			input_transform = self.get_default_transform()
+		if isinstance(input_transform, list):
+			input_transform = {in_name: t for in_name, t in zip(self.input_sizes, input_transform)}
+		self.input_transform: Dict[str, Callable] = input_transform
+		self._add_to_device_transform_()
+
+	# TODO: split the inputs to two sets: spikes and currents. En utilisant le specs, on peut changer
+	#  l'architecture du snn afin d'être en mesure de bien gérer les inputs. Les inputs de style onHot
+	#  devraient être des entrée de formes spikes et les entrées de forment continue devraient être envoyer
+	#  sous forme de courant. Idéalement les entrées sous forme d'image devraient être traité par un conv snn.
+	#  Il devrait avoir autant de layer d'entrés que de sensor (len(self.spec.observation_specs)). Ces layers
+	#  d'entrées devraient output sur une même hidden layer.
 
 	@property
 	def checkpoints_meta_path(self) -> str:
 		return f"{self.checkpoint_folder}/{self.model_name}{SNN.SUFFIX_SEP}{SNN.CHECKPOINTS_META_SUFFIX}.json"
 
+	@property
+	def input_sizes(self) -> Dict[str, int]:
+		return {
+			obs.name: np.prod([
+				d
+				for d, d_type in zip(obs.shape, obs.dimension_property)
+				if d_type == DimensionProperty.TRANSLATIONAL_EQUIVARIANCE
+			], dtype=int)
+			for obs in self.spec.observation_specs
+		}
+
+	@property
+	def output_size(self) -> int:
+		return int(self.spec.action_spec.continuous_size + self.spec.action_spec.discrete_size)
+
+	def _get_and_check_int_time_steps(self) -> int:
+		int_times = [
+			d
+			for obs in self.spec.observation_specs
+			for d, d_type in zip(obs.shape, obs.dimension_property)
+			if d_type == DimensionProperty.NONE
+		]
+		assert len(set(int_times)) == 1, "All int_times must be the same"
+		return int_times[0]
+
+	def get_default_transform(self) -> Dict[str, nn.Module]:
+		return {
+			in_name: Compose([
+				Lambda(lambda a: torch.from_numpy(a)),
+			])
+			for in_name in self.input_sizes
+		}
+
+	def _add_to_device_transform_(self):
+		for in_name, trans in self.input_transform.items():
+			self.input_transform[in_name] = Compose([trans, Lambda(lambda t: t.to(self.device))])
+
 	def _set_default_device_(self):
 		self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-	def _add_input_layer_(self):
+	def _dispatch_first_hidden_size(self) -> Dict[str, int]:
+		norm_factor = np.sum([v for _, v in self.input_sizes.items()])
+		ratios = {k: v / norm_factor for k, v in self.input_sizes.items()}
+		first_hidden_sizes = {k: int(v * self.n_hidden_neurons[0]) for k, v in ratios.items()}
+		if self.n_hidden_neurons[0] != sum(first_hidden_sizes.values()):
+			key_max_size = max(self.input_sizes, key=lambda k: self.input_sizes[k])
+			first_hidden_sizes[key_max_size] += self.n_hidden_neurons[0] - sum(first_hidden_sizes.values())
+		return first_hidden_sizes
+
+	def _add_input_layers_(self):
 		if not self.n_hidden_neurons:
 			return
-		self.layers["input"] = self.hidden_layer_type(
-			input_size=self.input_size,
-			output_size=self.n_hidden_neurons[0],
-			use_recurrent_connection=self.use_recurrent_connection,
-			dt=self.dt,
-			spike_func=self.spike_func,
-			device=self.device,
-			**self.kwargs
-		)
+		for l_name, in_size in self.input_sizes.items():
+			self.input_layers[l_name] = self.hidden_layer_type(
+				input_size=in_size,
+				output_size=self.first_hidden_sizes[l_name],
+				use_recurrent_connection=self.use_recurrent_connection,
+				dt=self.dt,
+				spike_func=self.spike_func,
+				device=self.device,
+				**self.kwargs
+			)
 
 	def _add_hidden_layers_(self):
 		if not self.n_hidden_neurons:
@@ -134,7 +211,7 @@ class SNN(torch.nn.Module):
 		if self.n_hidden_neurons:
 			in_size = self.n_hidden_neurons[-1]
 		else:
-			in_size = self.input_size
+			in_size = int(np.prod(self.input_sizes.values()))
 		self.layers["readout"] = ReadoutLayer(
 			input_size=in_size,
 			output_size=self.output_size,
@@ -145,7 +222,7 @@ class SNN(torch.nn.Module):
 		)
 
 	def _add_layers_(self):
-		self._add_input_layer_()
+		self._add_input_layers_()
 		self._add_hidden_layers_()
 		self._add_readout_layer()
 
@@ -201,16 +278,23 @@ class SNN(torch.nn.Module):
 		}
 		return hidden_states
 
-	def forward(self, inputs):
-		inputs = self._format_inputs(inputs)
+	def forward(self, inputs: Dict[str, torch.Tensor]) -> Tuple[Tensor, Dict[str, Tuple[Tensor, ...]]]:
+		inputs = {k: self._format_inputs(in_tensor) for k, in_tensor in inputs.items()}
 		hidden_states = {
 			layer_name: [None for t in range(self.int_time_steps + 1)]
-			for layer_name, _ in self.layers.items()
+			for layer_name in self.all_layer_names
 		}
 		outputs_trace: List[torch.Tensor] = []
 
 		for t in range(1, self.int_time_steps + 1):
-			forward_tensor = inputs[:, t - 1]
+			features_list = []
+			for layer_name, layer in self.input_layers.items():
+				features, hidden_states[layer_name][t] = layer(inputs[layer_name][:, t - 1])
+				features_list.append(features)
+			if features_list:
+				forward_tensor = torch.concat(features_list, dim=1)
+			else:
+				forward_tensor = torch.concat([inputs[in_name][:, t - 1] for in_name in inputs], dim=1)
 			for layer_idx, (layer_name, layer) in enumerate(self.layers.items()):
 				hh = hidden_states[layer_name][t - 1]
 				forward_tensor, hidden_states[layer_name][t] = layer(forward_tensor, hh)
@@ -272,113 +356,148 @@ class SNN(torch.nn.Module):
 				counts.extend(traces[-1].sum(dim=(0, 1)).tolist())
 		return torch.tensor(counts, dtype=torch.float32, device=self.device)
 
-	def obs_to_inputs(self, obs):
+	def obs_to_inputs(self, obs: List[np.ndarray]) -> Dict[str, torch.Tensor]:
 		"""
-
 		:param obs: shape: (observation_size, nb_agents, )
 		:return:
 		"""
-		spikes = np.asarray(obs)  # TODO: add time dimension
-		return torch.from_numpy(spikes)
+		inputs = {
+			obs_spec.name: torch.stack(
+				[self.input_transform[obs_spec.name](obs_i) for obs_i in obs[obs_index]],
+				dim=0
+			)
+			for obs_index, obs_spec in enumerate(self.spec.observation_specs)
+		}
+		return inputs
 
-	def get_action(self, inputs, epsilon: float = 0.0) -> ActionTuple:
+	def get_actions(self, inputs, epsilon: float = 0.0) -> ActionTuple:
 		if np.random.random() < epsilon:
 			return self.spec.action_spec.random_action(inputs.shape[0])
-		output_records, spikes_records, membrane_potential_records = self.forward(inputs)
-		output_values = output_records[-1].cpu().detach().numpy()
-		action = self.spec.action_spec.empty_action(inputs.shape[0])
+		output_records, hidden_states = self.forward(inputs)
+		output_values = output_records[:, -1].cpu().detach().numpy()
+		actions = self.spec.action_spec.empty_action(output_records.shape[0])
 		if self.spec.action_spec.continuous_size > 0:
-			action.add_continuous(output_values[:, :self.spec.action_spec.continuous_size])
+			actions.add_continuous(output_values[:, :self.spec.action_spec.continuous_size])
 		if self.spec.action_spec.discrete_size > 0:
 			discrete_values = output_values[:, self.spec.action_spec.continuous_size:]
 			discrete_action = np.zeros((inputs.shape[0], self.spec.action_spec.discrete_size))
 			for branch_idx, branch in enumerate(self.spec.action_spec.discrete_branches):
 				branch_cum_idx = sum(self.spec.action_spec.discrete_branches[:branch_idx])
-				branch_values = discrete_values[:, branch_cum_idx:branch_cum_idx+branch]
+				branch_values = discrete_values[:, branch_cum_idx:branch_cum_idx + branch]
 				discrete_action[:, branch_idx] = np.argmax(branch_values, axis=-1)
-			action.add_discrete(discrete_action)
-		return action
+			actions.add_discrete(discrete_action)
+		return actions
+
+	@staticmethod
+	def unbatch_actions(actions: ActionTuple) -> List[ActionTuple]:
+		"""
+		:param actions: shape: (batch_size, ...)
+		:return:
+		"""
+		actions_list = []
+		continuous, discrete = actions.continuous, actions.discrete
+		batch_size = actions.continuous.shape[0] if continuous is not None else discrete.shape[0]
+		assert batch_size is not None
+		for i in range(batch_size):
+			actions_list.append(
+				ActionTuple(
+					continuous[i] if continuous is not None else None,
+					discrete[i] if discrete is not None else None)
+			)
+		return actions_list
 
 	def fit(self, env: BaseEnv, buffer_size: int, epsilon: float):
 		buffer = ReplayBuffer(buffer_size)
 		env.reset()
 		behavior_name = list(env.behavior_specs)[0]
 
+	@staticmethod
+	def _exec_terminal_steps(
+			agent_maps: AgentsHistoryMaps,
+			buffer: ReplayBuffer,
+			terminal_steps: TerminalSteps
+	) -> List[float]:
+		"""
+		Execute terminal steps and return the rewards
+		:param agent_maps: The agent maps
+		:param buffer: The replay buffer
+		:param terminal_steps: The terminal steps
+		:return: The rewards
+		"""
+		cumulative_rewards = []
+		# For all Agents with a Terminal Step:
+		for agent_id_terminated in terminal_steps:
+			# Create its last experience (is last because the Agent terminated)
+			last_experience = Experience(
+				obs=deepcopy(agent_maps.last_obs[agent_id_terminated]),
+				reward=terminal_steps[agent_id_terminated].reward,
+				done=not terminal_steps[agent_id_terminated].interrupted,
+				action=deepcopy(agent_maps.last_action[agent_id_terminated]),
+				next_obs=terminal_steps[agent_id_terminated].obs,
+			)
+			agent_maps.trajectories[agent_id_terminated].append(last_experience)
+			# Clear its last observation and action (Since the trajectory is over)
+			agent_maps.last_obs.pop(agent_id_terminated)
+			agent_maps.last_action.pop(agent_id_terminated)
+			# Report the cumulative reward
+			cumulative_rewards.append(
+				agent_maps.cumulative_reward.pop(agent_id_terminated, 0.0)
+				+ terminal_steps[agent_id_terminated].reward
+			)
+			# Add the Trajectory to the buffer
+			buffer.extend(agent_maps.trajectories.pop(agent_id_terminated))
+		return cumulative_rewards
+
+	@staticmethod
+	def _exec_decisions_steps(agent_maps: AgentsHistoryMaps, decision_steps: DecisionSteps):
+		"""
+		Execute the decision steps of the agents
+		:param agent_maps: The AgentMaps
+		:param decision_steps: The decision steps
+		:return: None
+		"""
+		# For all Agents with a Decision Step:
+		for agent_id_decisions in decision_steps:
+			# If the Agent requesting a decision has a "last observation"
+			if agent_id_decisions in agent_maps.last_obs:
+				# Create an Experience from the last observation and the Decision Step
+				exp = Experience(
+					obs=deepcopy(agent_maps.last_obs[agent_id_decisions]),
+					reward=decision_steps[agent_id_decisions].reward,
+					done=False,
+					action=deepcopy(agent_maps.last_action[agent_id_decisions]),
+					next_obs=decision_steps[agent_id_decisions].obs,
+				)
+				# Update the Trajectory of the Agent and its cumulative reward
+				agent_maps.trajectories[agent_id_decisions].append(exp)
+				agent_maps.cumulative_reward[agent_id_decisions] += decision_steps[agent_id_decisions].reward
+			# Store the observation as the new "last observation"
+			agent_maps.last_obs[agent_id_decisions] = decision_steps[agent_id_decisions].obs
+
 	def generate_trajectories(self, env: BaseEnv, buffer_size: int, epsilon: float):
 		# Create an empty Buffer
 		buffer = ReplayBuffer(buffer_size)
-
 		# Reset the environment
 		env.reset()
 		# Read and store the Behavior Name of the Environment
 		behavior_name = list(env.behavior_specs)[0]
-
-		# Create a Mapping from AgentId to Trajectories. This will help us create
-		# trajectories for each Agents
-		dict_trajectories_from_agent: Dict[int, Trajectory] = {}
-		# Create a Mapping from AgentId to the last observation of the Agent
-		dict_last_obs_from_agent: Dict[int, np.ndarray] = {}
-		# Create a Mapping from AgentId to the last observation of the Agent
-		dict_last_action_from_agent: Dict[int, np.ndarray] = {}
-		# Create a Mapping from AgentId to cumulative reward (Only for reporting)
-		dict_cumulative_reward_from_agent: Dict[int, float] = {}
-		# Create a list to store the cumulative rewards obtained so far
+		agent_maps = AgentsHistoryMaps()
 		cumulative_rewards: List[float] = []
 
 		while len(buffer) < buffer_size:  # While not enough data in the buffer
 			# Get the Decision Steps and Terminal Steps of the Agents
 			decision_steps, terminal_steps = env.get_steps(behavior_name)
-
-			# For all Agents with a Terminal Step:
-			for agent_id_terminated in terminal_steps:
-				# Create its last experience (is last because the Agent terminated)
-				last_experience = Experience(
-					obs=dict_last_obs_from_agent[agent_id_terminated].copy(),
-					reward=terminal_steps[agent_id_terminated].reward,
-					done=not terminal_steps[agent_id_terminated].interrupted,
-					action=dict_last_action_from_agent[agent_id_terminated].copy(),
-					next_obs=terminal_steps[agent_id_terminated].obs[0],
-				)
-				# Clear its last observation and action (Since the trajectory is over)
-				dict_last_obs_from_agent.pop(agent_id_terminated)
-				dict_last_action_from_agent.pop(agent_id_terminated)
-				# Report the cumulative reward
-				cumulative_reward = (
-						dict_cumulative_reward_from_agent.pop(agent_id_terminated)
-						+ terminal_steps[agent_id_terminated].reward
-				)
-				cumulative_rewards.append(cumulative_reward)
-				# Add the Trajectory and the last experience to the buffer
-				buffer.extend(dict_trajectories_from_agent.pop(agent_id_terminated))
-				buffer.store(last_experience)
-
-			# For all Agents with a Decision Step:
-			for agent_id_decisions in decision_steps:
-				# If the Agent does not have a Trajectory, create an empty one
-				if agent_id_decisions not in dict_trajectories_from_agent:
-					dict_trajectories_from_agent[agent_id_decisions] = []
-					dict_cumulative_reward_from_agent[agent_id_decisions] = 0
-
-				# If the Agent requesting a decision has a "last observation"
-				if agent_id_decisions in dict_last_obs_from_agent:
-					# Create an Experience from the last observation and the Decision Step
-					exp = Experience(
-						obs=dict_last_obs_from_agent[agent_id_decisions].copy(),
-						reward=decision_steps[agent_id_decisions].reward,
-						done=False,
-						action=dict_last_action_from_agent[agent_id_decisions].copy(),
-						next_obs=decision_steps[agent_id_decisions].obs[0],
-					)
-					# Update the Trajectory of the Agent and its cumulative reward
-					dict_trajectories_from_agent[agent_id_decisions].append(exp)
-					dict_cumulative_reward_from_agent[agent_id_decisions] += decision_steps[agent_id_decisions].reward
-				# Store the observation as the new "last observation"
-				dict_last_obs_from_agent[agent_id_decisions] = decision_steps[agent_id_decisions].obs[0]
-
-			env.set_actions(behavior_name, self.get_action(self.obs_to_inputs(decision_steps.obs), epsilon))
+			cumulative_rewards.extend(self._exec_terminal_steps(agent_maps, buffer, terminal_steps))
+			if len(decision_steps) > 0:
+				self._exec_decisions_steps(agent_maps, decision_steps)
+				actions = self.get_actions(self.obs_to_inputs(decision_steps.obs), epsilon)
+				actions_list = self.unbatch_actions(actions)
+				for agent_index, agent_id in enumerate(decision_steps.agent_id):
+					agent_maps.last_action[agent_id] = actions_list[agent_index]
+				env.set_actions(behavior_name, actions)
 			# Perform a step in the simulation
 			env.step()
-		return buffer, np.mean(cumulative_rewards)
+		return buffer, cumulative_rewards
 
 	def update_weights(self):
 		raise NotImplementedError()
@@ -471,11 +590,22 @@ if __name__ == '__main__':
 	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
 	env = UnityEnvironment(file_name=None, seed=42, side_channels=[])
 	env.reset()
-	snn = SNN(spec=env.behavior_specs[list(env.behavior_specs)[0]])
-	snn.generate_trajectories(env, 1024, 0.0)
-
-
-
-
-
-
+	snn = SNN(
+		spec=env.behavior_specs[list(env.behavior_specs)[0]],
+		n_hidden_neurons=128,
+		int_time_steps=10,
+		input_transform=[
+			Compose([
+				Lambda(lambda a: torch.from_numpy(a)),
+				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
+				Lambda(lambda t: torch.flatten(t, start_dim=1))
+			]),
+			Compose([
+				Lambda(lambda a: torch.from_numpy(a)),
+			])
+		]
+	)
+	_, hist = snn.generate_trajectories(env, 1024, 0.0)
+	env.close()
+	plt.plot(hist)
+	plt.show()
