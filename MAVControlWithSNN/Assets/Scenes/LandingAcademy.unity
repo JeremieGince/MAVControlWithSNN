@@ -430,7 +430,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   environmentPrefab: {fileID: 6109155462070726394, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
-  batchSize: 1
+  batchSize: 2
   padSize: 5
 --- !u!4 &366743825
 Transform:
