@@ -141,3 +141,10 @@ class LossHistory:
 		if show:
 			plt.show()
 		plt.close(fig)
+
+
+def to_tensor(x, dtype=torch.float32):
+	if isinstance(x, np.ndarray):
+		return torch.from_numpy(x).type(dtype)
+	return torch.tensor(x, dtype=dtype)
+
