@@ -1,5 +1,6 @@
 import json
 import os
+import warnings
 from copy import deepcopy
 from typing import Any, Callable, DefaultDict, Dict, Iterable, List, NamedTuple, Sequence, Tuple, Type, Union
 from collections import defaultdict
@@ -16,7 +17,7 @@ import enum
 
 from torchvision.transforms import ToTensor, Compose, Lambda
 
-from PythonAcademy.models.dqn import BatchExperience, Experience, ReplayBuffer, Trajectory
+from PythonAcademy.buffers import BatchExperience, Experience, ReplayBuffer, Trajectory
 from PythonAcademy.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
 from PythonAcademy.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
 from PythonAcademy.utils import LossHistory, mapping_update_recursively, to_tensor
@@ -117,7 +118,7 @@ class SNNAgent(torch.nn.Module):
 		self._add_to_device_transform_()
 
 		self.continuous_criterion = nn.MSELoss()
-		self.discrete_criterion = nn.CrossEntropyLoss()
+		self.discrete_criterion = nn.MSELoss()
 
 	@property
 	def checkpoints_meta_path(self) -> str:
@@ -371,7 +372,7 @@ class SNNAgent(torch.nn.Module):
 		:param obs: shape: (observation_size, nb_agents, )
 		:return:
 		"""
-		inputs = self.obs_to_inputs(torch.unsqueeze(obs, dim=0))  # TODO: arranger la structure pour unsqueeze ou jsais pas quoi
+		inputs = self.obs_to_inputs(obs)
 		output_records, hidden_states = self(inputs)
 		output_values = output_records[:, -1]
 		continuous_outputs = output_values[:, :self.spec.action_spec.continuous_size]
@@ -386,9 +387,11 @@ class SNNAgent(torch.nn.Module):
 			discrete_outputs = torch.cat(discrete_outputs, dim=-1)
 		return continuous_outputs, discrete_outputs
 
-	def get_actions(self, inputs, epsilon: float = 0.0) -> ActionTuple:
+	def get_actions(self, inputs: Dict[str, torch.Tensor], epsilon: float = 0.0) -> ActionTuple:
+		batch_size = inputs[self.spec.observation_specs[0].name].shape[0]
+		assert all([inputs[obs_spec.name].shape[0] == batch_size for obs_spec in self.spec.observation_specs])
 		if np.random.random() < epsilon:
-			return self.spec.action_spec.random_action(inputs.shape[0])
+			return self.spec.action_spec.random_action(batch_size)
 		output_records, hidden_states = self(inputs)
 		output_values = output_records[:, -1].cpu().detach().numpy()
 		actions = self.spec.action_spec.empty_action(output_values.shape[0])
@@ -396,7 +399,7 @@ class SNNAgent(torch.nn.Module):
 			actions.add_continuous(output_values[:, :self.spec.action_spec.continuous_size])
 		if self.spec.action_spec.discrete_size > 0:
 			discrete_values = output_values[:, self.spec.action_spec.continuous_size:]
-			discrete_action = np.zeros((inputs.shape[0], self.spec.action_spec.discrete_size))
+			discrete_action = np.zeros((batch_size, self.spec.action_spec.discrete_size))
 			for branch_idx, branch in enumerate(self.spec.action_spec.discrete_branches):
 				branch_cum_idx = sum(self.spec.action_spec.discrete_branches[:branch_idx])
 				branch_values = discrete_values[:, branch_cum_idx:branch_cum_idx + branch]
@@ -422,12 +425,31 @@ class SNNAgent(torch.nn.Module):
 			)
 		return actions_list
 
-	def fit(self, env: BaseEnv, buffer_size: int = 1024, epsilon: float = 0.0):
-		optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+	def fit(
+			self,
+			env: BaseEnv,
+			num_iterations: int = 100,
+			buffer_size: int = 1024,
+			epsilon: float = 0.2,
+			init_lr: float = 3.0e-4,
+			batch_size: int = 256,
+			num_epochs: int = 3,
+			gamma: float = 0.99,
+			verbose: bool = True,
+	):
+		optimizer = torch.optim.Adam(self.parameters(), lr=init_lr)
 		env.reset()
 		behavior_name = list(env.behavior_specs)[0]
-		buffer, cumulative_rewards = self.generate_trajectories(env, buffer_size, epsilon)
-		self.fit_buffer(buffer, optimizer)
+		
+		iterations_cumulative_rewards = []
+		iterations_losses = []
+		for i in tqdm.tqdm(range(num_iterations), disable=not verbose, desc="Training"):
+			buffer, cumulative_rewards = self.generate_trajectories(env, buffer_size, epsilon, verbose=False)
+			iterations_cumulative_rewards.append(np.mean(cumulative_rewards))
+			itr_loss = self.fit_buffer(buffer, optimizer, batch_size, num_epochs, gamma)
+			iterations_losses.append(itr_loss)
+		
+		return iterations_cumulative_rewards, iterations_losses
 
 	def fit_buffer(
 			self,
@@ -436,17 +458,20 @@ class SNNAgent(torch.nn.Module):
 			batch_size: int = 256,
 			num_epoch: int = 3,
 			gamma: float = 0.9,
-	):
+	) -> float:
 		"""
 		Performs an update of the Q-Network using the provided optimizer and buffer
 		"""
 		batch_size = min(len(buffer), batch_size)
-		batches = buffer.get_batch_generator(batch_size, randomize=True)
+		batches = buffer.get_batch_generator(batch_size, randomize=True, device=self.device)
+		losses = []
 		for _ in range(num_epoch):
 			for batch in batches:
 				predictions = self._obs_forward_to_logits(batch.obs)
 				targets = self._obs_forward_to_logits(batch.next_obs)
-				self.update_weights(batch, predictions, targets, optimizer, gamma)
+				loss = self.update_weights(batch, predictions, targets, optimizer, gamma)
+				losses.append(loss)
+		return float(np.mean(losses))
 
 	def _compute_continuous_loss(self, batch: BatchExperience, predictions, targets, gamma: float) -> torch.Tensor:
 		if torch.numel(batch.continuous_actions) == 0:
@@ -471,10 +496,18 @@ class SNNAgent(torch.nn.Module):
 					* gamma
 					* targets
 			).to(self.device)
+			warnings.warn("Discrete loss is not implemented with cross entropy loss. This is a temporary solution.")
 			discrete_loss = self.discrete_criterion(predictions, targets)
 		return discrete_loss
 
-	def update_weights(self, batch: BatchExperience, predictions, targets, optimizer, gamma: float):
+	def update_weights(
+			self,
+			batch: BatchExperience,
+			predictions,
+			targets,
+			optimizer,
+			gamma: float
+	) -> float:
 		assert torch.numel(batch.continuous_actions) + torch.numel(batch.discrete_actions) > 0
 		continuous_loss = self._compute_continuous_loss(batch, predictions[0], targets[0], gamma)
 		discrete_loss = self._compute_discrete_loss(batch, predictions[1], targets[1], gamma)
@@ -483,6 +516,7 @@ class SNNAgent(torch.nn.Module):
 		optimizer.zero_grad()
 		loss.backward()
 		optimizer.step()
+		return loss.detach().cpu().numpy().item()
 
 	@staticmethod
 	def actions_to_tensors(actions: Iterable[ActionTuple]) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -555,7 +589,13 @@ class SNNAgent(torch.nn.Module):
 			# Store the observation as the new "last observation"
 			agent_maps.last_obs[agent_id_decisions] = decision_steps[agent_id_decisions].obs
 
-	def generate_trajectories(self, env: BaseEnv, buffer_size: int, epsilon: float, verbose = False):
+	def generate_trajectories(
+			self,
+			env: BaseEnv,
+			buffer_size: int,
+			epsilon: float,
+			verbose: bool = False
+	) -> Tuple[ReplayBuffer, List[float]]:
 		# Create an empty Buffer
 		buffer = ReplayBuffer(buffer_size)
 		# Reset the environment
@@ -564,7 +604,7 @@ class SNNAgent(torch.nn.Module):
 		behavior_name = list(env.behavior_specs)[0]
 		agent_maps = AgentsHistoryMaps()
 		cumulative_rewards: List[float] = []
-		p_bar = tqdm.tqdm(total=buffer_size-len(buffer), disable=not verbose)
+		p_bar = tqdm.tqdm(total=buffer_size-len(buffer), disable=not verbose, desc="Generating Trajectories")
 		last_len_buffer = len(buffer)
 		while len(buffer) < buffer_size:  # While not enough data in the buffer
 			# Get the Decision Steps and Terminal Steps of the Agents
@@ -688,8 +728,14 @@ if __name__ == '__main__':
 			])
 		]
 	)
-	# snn.fit(env, 32)
-	_, hist = snn.generate_trajectories(env, 1024, 0.0, verbose=True)
+	R, L = snn.fit(env, num_iterations=100, buffer_size=256, batch_size=32, verbose=True)
+	# _, hist = snn.generate_trajectories(env, 1024, 0.0, verbose=True)
 	env.close()
-	plt.plot(hist)
+	fig, axes = plt.subplots(1, 2, figsize=(10, 6), sharex='all')
+	axes[0].plot(R, label="R")
+	axes[0].legend()
+	axes[0].set_xlabel("Iterations [-]")
+	axes[1].plot(L, label="loss")
+	axes[1].legend()
+	axes[1].set_xlabel("Iterations [-]")
 	plt.show()
