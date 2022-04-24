@@ -430,7 +430,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   environmentPrefab: {fileID: 6109155462070726394, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
-  batchSize: 2
+  batchSize: 4
   padSize: 5
 --- !u!4 &366743825
 Transform:
@@ -801,8 +801,8 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1238439513}
-  m_LocalRotation: {x: 0.00521555, y: 0.96389854, z: -0.26553303, w: 0.01909339}
-  m_LocalPosition: {x: -22.071922, y: 26.521372, z: 25.774212}
+  m_LocalRotation: {x: 0.15816635, y: -0.68299854, z: 0.15570505, w: 0.69588244}
+  m_LocalPosition: {x: 44.35895, y: 30.977612, z: -0.69038415}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
@@ -820,11 +820,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c6b456a85f2a5a147b32d1ee902101bb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  environmentManager: {fileID: 366743824}
   target: {fileID: 1468877707}
   offset: {x: 0, y: 2, z: -3}
   rotation: {x: 25, y: 0, z: 0}
+  canvas: {fileID: 139556833}
   neuromorphicRawImage: {fileID: 1325904097}
   frontCameraRawImage: {fileID: 2143237632}
+  followTargetAgent: 0
 --- !u!1 &1308849873
 GameObject:
   m_ObjectHideFlags: 1

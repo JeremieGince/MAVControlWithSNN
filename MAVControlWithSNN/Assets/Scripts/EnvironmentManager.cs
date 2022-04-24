@@ -31,6 +31,11 @@ public class EnvironmentManager : MonoBehaviour
     }
 
 
+    public List<EnvironmentScript> GetEnvironments() {
+        return environments;
+    }
+
+
     private void InitializeReferences() {
         environmentParameters = Academy.Instance.EnvironmentParameters;
         batchSize = (int)environmentParameters.GetWithDefault("batchSize", (float)batchSize);  // batchSize is the number of env or agents

@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Unity.MLAgents;
 using Unity.MLAgents.Sensors;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -233,6 +234,8 @@ public class NeuromorphicCameraSensor : ISensor, IDisposable {
 [RequireComponent(typeof(Camera))]
 public class NeuromorphicCamera : SensorComponent, IDisposable {
 
+    private EnvironmentParameters environmentParameters;
+
     [SerializeField] private Camera cameraInput;
     private Texture2D m_TextureInput;
     private NeuromorphicCameraSensor sensor;
@@ -252,6 +255,8 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
     // Start is called before the first frame update
     void Start()
     {
+        environmentParameters = Academy.Instance.EnvironmentParameters;
+        observationStacks = (int)environmentParameters.GetWithDefault("observationStacks", (float)observationStacks);
         SetCamera();
         m_TextureInput = new Texture2D(cameraInput.pixelWidth, cameraInput.pixelHeight, TextureFormat.RGBA32, mipChain: false);
     }
