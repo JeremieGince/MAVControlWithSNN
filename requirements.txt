@@ -1,7 +1,6 @@
+matplotlib==3.5.1
 mlagents_envs==0.27.0
-mlagents==0.27.0
-gym_unity==0.27.0
 numpy==1.22.2
-
-torch~=1.11.0+cu113
-Poutyne~=1.10.1
+torch==1.11.0+cu113
+torchvision==0.12.0+cu113
+tqdm==4.64.0
