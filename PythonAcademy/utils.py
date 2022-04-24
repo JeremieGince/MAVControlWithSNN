@@ -84,7 +84,7 @@ def mapping_update_recursively(d, u):
 	return d
 
 
-class LossHistory:
+class TrainingHistory:
 	def __init__(self, container: Dict[str, List[float]] = None):
 		self.container = defaultdict(list)
 		if container is not None:
@@ -127,17 +127,42 @@ class LossHistory:
 		if key in self:
 			argmin = np.argmin(self[key])
 			return {k: v[argmin] for k, v in self.items()}
+	
+	@staticmethod
+	def _set_default_plot_kwargs(kwargs: dict):
+		kwargs.setdefault('fontsize', 16)
+		kwargs.setdefault('linewidth', 3)
+		kwargs.setdefault('figsize', (12, 10))
+		kwargs.setdefault('dpi', 300)
+		return kwargs
 
-	def plot(self, save_path=None, show=False):
-		import matplotlib.pyplot as plt
-		fig, ax = plt.subplots(figsize=(12, 10))
-		for name, values in self.items():
-			ax.plot(values, label=name, linewidth=3)
-		ax.set_xlabel("Epoch [-]", fontsize=16)
-		ax.set_ylabel("Loss [-]", fontsize=16)
-		ax.legend(fontsize=16)
+	def plot(
+			self,
+			save_path=None,
+			show=False,
+			**kwargs
+	):
+		kwargs = self._set_default_plot_kwargs(kwargs)
+		loss_metrics = [k for k in self.container if 'loss' in k.lower()]
+		other_metrics = [k for k in self.container if k not in loss_metrics]
+		n_rows = int(np.sqrt(1 + len(other_metrics)))
+		n_cols = int((1 + len(other_metrics)) / n_rows)
+		fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=kwargs["figsize"])
+		axes = np.ravel(axes)
+		for i, ax in enumerate(axes):
+			if i == 0:
+				for k in loss_metrics:
+					ax.plot(self[k], label=k, linewidth=kwargs['linewidth'])
+				ax.set_ylabel("Loss [-]", fontsize=kwargs["fontsize"])
+				ax.set_xlabel("Iterations [-]", fontsize=kwargs["fontsize"])
+				ax.legend(fontsize=kwargs["fontsize"])
+			else:
+				k = other_metrics[i - 1]
+				ax.plot(self[k], label=k, linewidth=kwargs['linewidth'])
+				ax.set_xlabel("Iterations [-]", fontsize=kwargs["fontsize"])
+				ax.legend(fontsize=kwargs["fontsize"])
 		if save_path is not None:
-			plt.savefig(save_path, dpi=300)
+			plt.savefig(save_path, dpi=kwargs["dpi"])
 		if show:
 			plt.show()
 		plt.close(fig)
