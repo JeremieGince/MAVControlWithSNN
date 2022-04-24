@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from PythonAcademy.models.dqn import DQN, dqn_loss
+# from PythonAcademy.models.dqn import DQN, dqn_loss
 
 
 def set_random_seed(environment, seed):
@@ -18,19 +18,19 @@ def set_random_seed(environment, seed):
 	random.seed(seed)
 
 
-def load_model(model_type, path_weights, environment, memory_size=20, model_kwargs={}):
-	model = model_type(environment.observation_space.shape,
-	                   environment.action_space.n,
-	                   memory_size=memory_size,
-	                   **model_kwargs)
-	m = DQN(
-		list(range(environment.action_space.n)),
-		model,
-		optimizer="sgd",
-		loss_function=dqn_loss,
-	)
-	m.load_weights(path_weights)
-	return m
+# def load_model(model_type, path_weights, environment, memory_size=20, model_kwargs={}):
+# 	model = model_type(environment.observation_space.shape,
+# 	                   environment.action_space.n,
+# 	                   memory_size=memory_size,
+# 	                   **model_kwargs)
+# 	m = DQN(
+# 		list(range(environment.action_space.n)),
+# 		model,
+# 		optimizer="sgd",
+# 		loss_function=dqn_loss,
+# 	)
+# 	m.load_weights(path_weights)
+# 	return m
 
 
 def show_rewards(R: Iterable, **kwargs):
@@ -146,5 +146,7 @@ class LossHistory:
 def to_tensor(x, dtype=torch.float32):
 	if isinstance(x, np.ndarray):
 		return torch.from_numpy(x).type(dtype)
-	return torch.tensor(x, dtype=dtype)
+	elif not isinstance(x, torch.Tensor):
+		return torch.tensor(x, dtype=dtype)
+	return x.type(dtype)
 
