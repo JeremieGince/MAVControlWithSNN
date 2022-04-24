@@ -711,7 +711,7 @@ sysinfo.txt
 [Ll]ib
 [Ll]ib64
 [Ll]ocal
-[Ss]cripts
+venv/[Ss]cripts
 pyvenv.cfg
 pip-selfcheck.json
 
