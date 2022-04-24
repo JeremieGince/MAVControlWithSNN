@@ -19,17 +19,38 @@ class Experience(NamedTuple):
 	obs: Any
 	action: ActionTuple
 	reward: float
-	done: bool
+	terminal: bool
 	next_obs: Any
+
+
+class BatchExperience(NamedTuple):
+	"""
+	A batch of experiences.
+	- Observation
+	- Action
+	- Reward
+	- Done flag
+	- Next Observation
+	"""
+	obs: torch.Tensor
+	continuous_actions: torch.Tensor
+	discrete_actions: torch.Tensor
+	rewards: torch.Tensor
+	terminals: torch.Tensor
+	next_obs: torch.Tensor
 
 
 Trajectory = List[Experience]
 
 
 class ReplayBuffer:
-	def __init__(self, buffer_size):
+	def __init__(self, buffer_size, seed=None):
 		self.__buffer_size = buffer_size
+		self.random_generator = np.random.RandomState(seed)
 		self.data: List[Experience] = []
+
+	def set_seed(self, seed: int):
+		self.random_generator.seed(seed)
 
 	def extend(self, iterable: Iterable):
 		_ = [self.store(e) for e in iterable]
@@ -47,11 +68,57 @@ class ReplayBuffer:
 
 		self.data.append(element)
 
-	def get_batch(self, batch_size: int) -> List[Experience]:
+	def get_random_batch(self, batch_size: int) -> List[Experience]:
 		"""
 		Returns a list of batch_size elements from the buffer.
 		"""
-		return random.choices(self.data, k=batch_size)
+		return self.random_generator.choice(self.data, size=batch_size)
+
+	def get_batch_tensor(self, batch_size: int) -> BatchExperience:
+		"""
+		Returns a list of batch_size elements from the buffer.
+		"""
+		batch = self.get_random_batch(batch_size)
+		return self._make_batch(batch)
+
+	@staticmethod
+	def _make_batch(batch: List[Experience]) -> BatchExperience:
+		"""
+		Returns a list of batch_size elements from the buffer.
+		"""
+		obs = torch.from_numpy(np.stack([ex.obs for ex in batch]))
+		rewards = torch.from_numpy(
+			np.array([ex.reward for ex in batch], dtype=np.float32).reshape(-1, 1)
+		)
+		terminals = torch.from_numpy(
+			np.array([ex.terminal for ex in batch], dtype=np.float32).reshape(-1, 1)
+		)
+		continuous_actions = torch.from_numpy(np.stack([ex.action.continuous for ex in batch]))
+		discrete_actions = torch.from_numpy(np.stack([ex.action.discrete for ex in batch]))
+		next_obs = torch.from_numpy(np.stack([ex.next_obs for ex in batch]))
+		return BatchExperience(
+			obs=obs,
+			continuous_actions=continuous_actions,
+			discrete_actions=discrete_actions,
+			rewards=rewards,
+			terminals=terminals,
+			next_obs=next_obs,
+		)
+
+	def get_batch_generator(
+			self,
+			batch_size: int,
+			randomize: bool = True
+	) -> Iterable[BatchExperience]:
+		"""
+		Returns a generator of batch_size elements from the buffer.
+		"""
+		indexes = np.arange(len(self)).reshape(-1, batch_size)
+		if randomize:
+			self.random_generator.shuffle(indexes)
+		for batch_indexes in indexes:
+			batch = [self.data[i] for i in batch_indexes]
+			yield self._make_batch(batch)
 
 
 class DQNAgent(torch.nn.Module):
