@@ -1,134 +1,19 @@
-import random
-from typing import Any, Iterable, List, NamedTuple, Tuple, Union
+from typing import List, Tuple, Union
 
 import numpy as np
 import torch
-from mlagents_envs.base_env import ActionTuple, BehaviorSpec
+from mlagents_envs.base_env import BehaviorSpec
 from poutyne import Model
-
-
-class Experience(NamedTuple):
-	"""
-	An experience contains the data of one Agent transition.
-	- Observation
-	- Action
-	- Reward
-	- Done flag
-	- Next Observation
-	"""
-	obs: Any
-	action: ActionTuple
-	reward: float
-	terminal: bool
-	next_obs: Any
-
-
-class BatchExperience(NamedTuple):
-	"""
-	A batch of experiences.
-	- Observation
-	- Action
-	- Reward
-	- Done flag
-	- Next Observation
-	"""
-	obs: torch.Tensor
-	continuous_actions: torch.Tensor
-	discrete_actions: torch.Tensor
-	rewards: torch.Tensor
-	terminals: torch.Tensor
-	next_obs: torch.Tensor
-
-
-Trajectory = List[Experience]
-
-
-class ReplayBuffer:
-	def __init__(self, buffer_size, seed=None):
-		self.__buffer_size = buffer_size
-		self.random_generator = np.random.RandomState(seed)
-		self.data: List[Experience] = []
-
-	def set_seed(self, seed: int):
-		self.random_generator.seed(seed)
-
-	def extend(self, iterable: Iterable):
-		_ = [self.store(e) for e in iterable]
-
-	def __len__(self):
-		return len(self.data)
-
-	def store(self, element: Experience):
-		"""
-		Stores an element. If the replay buffer is already full, deletes the oldest
-		element to make space.
-		"""
-		if len(self.data) >= self.__buffer_size:
-			self.data.pop(0)
-
-		self.data.append(element)
-
-	def get_random_batch(self, batch_size: int) -> List[Experience]:
-		"""
-		Returns a list of batch_size elements from the buffer.
-		"""
-		return self.random_generator.choice(self.data, size=batch_size)
-
-	def get_batch_tensor(self, batch_size: int) -> BatchExperience:
-		"""
-		Returns a list of batch_size elements from the buffer.
-		"""
-		batch = self.get_random_batch(batch_size)
-		return self._make_batch(batch)
-
-	@staticmethod
-	def _make_batch(batch: List[Experience]) -> BatchExperience:
-		"""
-		Returns a list of batch_size elements from the buffer.
-		"""
-		obs = torch.from_numpy(np.stack([ex.obs for ex in batch]))
-		rewards = torch.from_numpy(
-			np.array([ex.reward for ex in batch], dtype=np.float32).reshape(-1, 1)
-		)
-		terminals = torch.from_numpy(
-			np.array([ex.terminal for ex in batch], dtype=np.float32).reshape(-1, 1)
-		)
-		continuous_actions = torch.from_numpy(np.stack([ex.action.continuous for ex in batch]))
-		discrete_actions = torch.from_numpy(np.stack([ex.action.discrete for ex in batch]))
-		next_obs = torch.from_numpy(np.stack([ex.next_obs for ex in batch]))
-		return BatchExperience(
-			obs=obs,
-			continuous_actions=continuous_actions,
-			discrete_actions=discrete_actions,
-			rewards=rewards,
-			terminals=terminals,
-			next_obs=next_obs,
-		)
-
-	def get_batch_generator(
-			self,
-			batch_size: int,
-			randomize: bool = True
-	) -> Iterable[BatchExperience]:
-		"""
-		Returns a generator of batch_size elements from the buffer.
-		"""
-		indexes = np.arange(len(self)).reshape(-1, batch_size)
-		if randomize:
-			self.random_generator.shuffle(indexes)
-		for batch_indexes in indexes:
-			batch = [self.data[i] for i in batch_indexes]
-			yield self._make_batch(batch)
 
 
 class DQNAgent(torch.nn.Module):
 	def __init__(self, spec: BehaviorSpec):
 		super(DQNAgent, self).__init__()
 		self.spec = spec
-
+	
 	def forward(self, obs):
 		raise NotImplementedError()
-
+	
 	def soft_update(self, other, tau):
 		"""
 		Code for the soft update between a target network (self) and
@@ -137,13 +22,13 @@ class DQNAgent(torch.nn.Module):
 		The weights are updated according to the rule in the assignment.
 		"""
 		new_weights = {}
-
+		
 		own_weights = self.get_weight_copies()
 		other_weights = other.get_weight_copies()
-
+		
 		for k in own_weights:
 			new_weights[k] = (1 - tau) * own_weights[k] + tau * other_weights[k]
-
+		
 		self.set_weights(new_weights)
 
 
@@ -151,10 +36,10 @@ class DQN(Model):
 	def __init__(self, actions, *args, **kwargs):
 		self.actions = actions
 		super().__init__(*args, **kwargs)
-
+	
 	def __call__(self, *args, **kwargs):
 		return self.get_action(*args, **kwargs)
-
+	
 	def get_action(self, state: Union[torch.Tensor, np.ndarray], epsilon: float) -> int:
 		"""
 		Returns the selected action according to an epsilon-greedy policy.
@@ -162,10 +47,14 @@ class DQN(Model):
 		if np.random.random() < epsilon:
 			return np.random.choice(self.actions)
 		else:
-			return np.argmax(self.predict([
-				state[np.newaxis, ],
-			], batch_size=1).squeeze()).item()
-
+			return np.argmax(
+				self.predict(
+					[
+						state[np.newaxis,],
+					], batch_size=1
+				).squeeze()
+				).item()
+	
 	def soft_update(self, other, tau):
 		"""
 		Code for the soft update between a target network (self) and
@@ -174,13 +63,13 @@ class DQN(Model):
 		The weights are updated according to the rule in the assignment.
 		"""
 		new_weights = {}
-
+		
 		own_weights = self.get_weight_copies()
 		other_weights = other.get_weight_copies()
-
+		
 		for k in own_weights:
 			new_weights[k] = (1 - tau) * own_weights[k] + tau * other_weights[k]
-
+		
 		self.set_weights(new_weights)
 
 
@@ -204,7 +93,7 @@ def format_batch(
 	"""
 	states = np.array([e[0] for e in batch])
 	actions = np.array([e[1] for e in batch])
-
+	
 	next_states = np.array([e[3] for e in batch])
 	target_predictions = target_network.predict([next_states, ], batch_size=len(next_states))
 	targets = np.array([e[2] + gamma * np.max(q) * (1 - e[4]) for e, q in zip(batch, target_predictions)])
