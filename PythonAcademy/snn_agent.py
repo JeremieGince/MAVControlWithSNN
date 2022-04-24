@@ -389,7 +389,7 @@ class SNNAgent(torch.nn.Module):
 			self,
 			env: BaseEnv,
 			num_iterations: int = 100,
-			buffer_size: int = 1024,
+			buffer_size: int = 4096,
 			epsilon: float = 0.2,
 			init_lr: float = 3.0e-4,
 			batch_size: int = 256,
@@ -403,15 +403,18 @@ class SNNAgent(torch.nn.Module):
 		behavior_name = list(env.behavior_specs)[0]
 		
 		target_network = deepcopy(self)
-		
-		for i in tqdm.tqdm(range(num_iterations), disable=not verbose, desc="Training"):
+		p_bar = tqdm.tqdm(range(num_iterations), disable=not verbose, desc="Training")
+		for i in p_bar:
 			buffer, cumulative_rewards = self.generate_trajectories(env, buffer_size, epsilon, verbose=False)
-			self.training_history.append("Rewards", np.mean(cumulative_rewards))
+			cum_rewards = np.mean(cumulative_rewards)
+			self.training_history.append("Rewards", cum_rewards)
 			itr_loss = self.fit_buffer(buffer, target_network, optimizer, batch_size, num_epochs, gamma, tau)
 			self.training_history.append("Loss", itr_loss)
 			# TODO: update saving pipeline
 			# self.save_checkpoint(optimizer, epoch, epoch_loss, is_best)
-		
+			p_bar.set_postfix(loss=f"{itr_loss:.3f}", cum_rewards=f"{cum_rewards:.3f}")
+			p_bar.update()
+		p_bar.close()
 		self.hard_update(target_network)
 		return self.training_history
 
@@ -683,15 +686,21 @@ if __name__ == '__main__':
 	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
 	from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 	from mlagents_envs.side_channel.engine_configuration_channel import EngineConfig
+
 	build_path = "../MAVControlWithSNN/Builds/MAVControlWithSNN.exe"
+	integration_time = 100
+
 	channel = EnvironmentParametersChannel()
 	env = UnityEnvironment(file_name=build_path, seed=42, side_channels=[channel], no_graphics=True)
-	channel.set_float_parameter("batch_size", 4)
+	channel.set_float_parameter("batchSize", 4)
+	channel.set_float_parameter("camFollowTargetAgent", False)
+	channel.set_float_parameter("droneMaxStartY", 1.5)
+	channel.set_float_parameter("observationStacks", integration_time)
 	env.reset()
 	snn = SNNAgent(
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
-		n_hidden_neurons=128,
-		int_time_steps=10,
+		n_hidden_neurons=256,
+		int_time_steps=integration_time,
 		input_transform=[
 			Compose([
 				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
@@ -703,7 +712,7 @@ if __name__ == '__main__':
 			])
 		]
 	)
-	hist = snn.fit(env, num_iterations=30, buffer_size=256, batch_size=32, init_lr=1e-2, tau=0.1, verbose=True)
+	hist = snn.fit(env, num_iterations=10, buffer_size=4096, batch_size=128, init_lr=3e-4, tau=0.01, verbose=True)
 	# _, hist = snn.generate_trajectories(env, 1024, 0.0, verbose=True)
 	env.close()
 	hist.plot(show=True, figsize=(10, 6))
