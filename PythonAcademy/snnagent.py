@@ -7,6 +7,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import tqdm as tqdm
 from mlagents_envs.environment import UnityEnvironment
 from torch import Tensor, nn
 import torch.nn.functional as F
@@ -554,7 +555,7 @@ class SNNAgent(torch.nn.Module):
 			# Store the observation as the new "last observation"
 			agent_maps.last_obs[agent_id_decisions] = decision_steps[agent_id_decisions].obs
 
-	def generate_trajectories(self, env: BaseEnv, buffer_size: int, epsilon: float):
+	def generate_trajectories(self, env: BaseEnv, buffer_size: int, epsilon: float, verbose = False):
 		# Create an empty Buffer
 		buffer = ReplayBuffer(buffer_size)
 		# Reset the environment
@@ -563,7 +564,8 @@ class SNNAgent(torch.nn.Module):
 		behavior_name = list(env.behavior_specs)[0]
 		agent_maps = AgentsHistoryMaps()
 		cumulative_rewards: List[float] = []
-
+		p_bar = tqdm.tqdm(total=buffer_size-len(buffer), disable=not verbose)
+		last_len_buffer = len(buffer)
 		while len(buffer) < buffer_size:  # While not enough data in the buffer
 			# Get the Decision Steps and Terminal Steps of the Agents
 			decision_steps, terminal_steps = env.get_steps(behavior_name)
@@ -575,8 +577,11 @@ class SNNAgent(torch.nn.Module):
 				for agent_index, agent_id in enumerate(decision_steps.agent_id):
 					agent_maps.last_action[agent_id] = actions_list[agent_index]
 				env.set_actions(behavior_name, actions)
+			p_bar.update(len(buffer) - last_len_buffer)
+			last_len_buffer = len(buffer)
 			# Perform a step in the simulation
 			env.step()
+		p_bar.close()
 		return buffer, cumulative_rewards
 
 	def _create_checkpoint_path(self, epoch: int = -1):
@@ -665,7 +670,8 @@ class SNNAgent(torch.nn.Module):
 
 if __name__ == '__main__':
 	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
-	env = UnityEnvironment(file_name=None, seed=42, side_channels=[])
+	build_path = "../MAVControlWithSNN/Builds/MAVControlWithSNN.exe"
+	env = UnityEnvironment(file_name=build_path, seed=42, side_channels=[], no_graphics=True)
 	env.reset()
 	snn = SNNAgent(
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
@@ -682,8 +688,8 @@ if __name__ == '__main__':
 			])
 		]
 	)
-	snn.fit(env, 32)
-	_, hist = snn.generate_trajectories(env, 1024, 0.0)
+	# snn.fit(env, 32)
+	_, hist = snn.generate_trajectories(env, 1024, 0.0, verbose=True)
 	env.close()
 	plt.plot(hist)
 	plt.show()
