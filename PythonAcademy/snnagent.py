@@ -1,7 +1,7 @@
 import json
 import os
 from copy import deepcopy
-from typing import Any, Callable, DefaultDict, Dict, Iterable, List, NamedTuple, Tuple, Type, Union
+from typing import Any, Callable, DefaultDict, Dict, Iterable, List, NamedTuple, Sequence, Tuple, Type, Union
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
@@ -15,10 +15,10 @@ import enum
 
 from torchvision.transforms import ToTensor, Compose, Lambda
 
-from PythonAcademy.models.dqn import Experience, ReplayBuffer, Trajectory
+from PythonAcademy.models.dqn import BatchExperience, Experience, ReplayBuffer, Trajectory
 from PythonAcademy.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
 from PythonAcademy.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
-from PythonAcademy.utils import LossHistory, mapping_update_recursively
+from PythonAcademy.utils import LossHistory, mapping_update_recursively, to_tensor
 
 
 class AgentsHistoryMaps:
@@ -39,16 +39,12 @@ class AgentsHistoryMaps:
 		self.cumulative_reward: Dict[int, float] = defaultdict(lambda: 0.0)
 
 
-class ReadoutMth(enum.Enum):
-	RNN = 0
-
-
 class LoadCheckpointMode(enum.Enum):
 	BEST_EPOCH = enum.auto()
 	LAST_EPOCH = enum.auto()
 
 
-class SNN(torch.nn.Module):
+class SNNAgent(torch.nn.Module):
 	SAVE_EXT = '.pth'
 	SUFFIX_SEP = '-'
 	CHECKPOINTS_META_SUFFIX = 'checkpoints'
@@ -79,7 +75,7 @@ class SNN(torch.nn.Module):
 			input_transform: Union[Dict[str, Callable], List[Callable]] = None,
 			**kwargs
 	):
-		super(SNN, self).__init__()
+		super(SNNAgent, self).__init__()
 		self.spec = spec
 		self.kwargs = kwargs
 
@@ -119,16 +115,12 @@ class SNN(torch.nn.Module):
 		self.input_transform: Dict[str, Callable] = input_transform
 		self._add_to_device_transform_()
 
-	# TODO: split the inputs to two sets: spikes and currents. En utilisant le specs, on peut changer
-	#  l'architecture du snn afin d'être en mesure de bien gérer les inputs. Les inputs de style onHot
-	#  devraient être des entrée de formes spikes et les entrées de forment continue devraient être envoyer
-	#  sous forme de courant. Idéalement les entrées sous forme d'image devraient être traité par un conv snn.
-	#  Il devrait avoir autant de layer d'entrés que de sensor (len(self.spec.observation_specs)). Ces layers
-	#  d'entrées devraient output sur une même hidden layer.
+		self.continuous_criterion = nn.MSELoss()
+		self.discrete_criterion = nn.CrossEntropyLoss()
 
 	@property
 	def checkpoints_meta_path(self) -> str:
-		return f"{self.checkpoint_folder}/{self.model_name}{SNN.SUFFIX_SEP}{SNN.CHECKPOINTS_META_SUFFIX}.json"
+		return f"{self.checkpoint_folder}/{self.model_name}{SNNAgent.SUFFIX_SEP}{SNNAgent.CHECKPOINTS_META_SUFFIX}.json"
 
 	@property
 	def input_sizes(self) -> Dict[str, int]:
@@ -356,7 +348,7 @@ class SNN(torch.nn.Module):
 				counts.extend(traces[-1].sum(dim=(0, 1)).tolist())
 		return torch.tensor(counts, dtype=torch.float32, device=self.device)
 
-	def obs_to_inputs(self, obs: List[np.ndarray]) -> Dict[str, torch.Tensor]:
+	def obs_to_inputs(self, obs: Sequence[Union[np.ndarray, torch.Tensor]]) -> Dict[str, torch.Tensor]:
 		"""
 		:param obs: shape: (observation_size, nb_agents, )
 		:return:
@@ -370,12 +362,35 @@ class SNN(torch.nn.Module):
 		}
 		return inputs
 
+	def _obs_forward_to_logits(
+			self,
+			obs: Sequence[Union[np.ndarray, torch.Tensor]]
+	) -> Tuple[torch.Tensor, torch.Tensor]:
+		"""
+		:param obs: shape: (observation_size, nb_agents, )
+		:return:
+		"""
+		inputs = self.obs_to_inputs(torch.unsqueeze(obs, dim=0))  # TODO: arranger la structure pour unsqueeze ou jsais pas quoi
+		output_records, hidden_states = self(inputs)
+		output_values = output_records[:, -1]
+		continuous_outputs = output_values[:, :self.spec.action_spec.continuous_size]
+		discrete_outputs = []
+		if self.spec.action_spec.discrete_size > 0:
+			discrete_values = output_values[:, self.spec.action_spec.continuous_size:]
+			for branch_idx, branch in enumerate(self.spec.action_spec.discrete_branches):
+				branch_cum_idx = sum(self.spec.action_spec.discrete_branches[:branch_idx])
+				branch_values = discrete_values[:, branch_cum_idx:branch_cum_idx + branch]
+				discrete_outputs.append(torch.max(branch_values, dim=-1).values)
+		if discrete_outputs:
+			discrete_outputs = torch.cat(discrete_outputs, dim=-1)
+		return continuous_outputs, discrete_outputs
+
 	def get_actions(self, inputs, epsilon: float = 0.0) -> ActionTuple:
 		if np.random.random() < epsilon:
 			return self.spec.action_spec.random_action(inputs.shape[0])
-		output_records, hidden_states = self.forward(inputs)
+		output_records, hidden_states = self(inputs)
 		output_values = output_records[:, -1].cpu().detach().numpy()
-		actions = self.spec.action_spec.empty_action(output_records.shape[0])
+		actions = self.spec.action_spec.empty_action(output_values.shape[0])
 		if self.spec.action_spec.continuous_size > 0:
 			actions.add_continuous(output_values[:, :self.spec.action_spec.continuous_size])
 		if self.spec.action_spec.discrete_size > 0:
@@ -406,10 +421,75 @@ class SNN(torch.nn.Module):
 			)
 		return actions_list
 
-	def fit(self, env: BaseEnv, buffer_size: int, epsilon: float):
-		buffer = ReplayBuffer(buffer_size)
+	def fit(self, env: BaseEnv, buffer_size: int = 1024, epsilon: float = 0.0):
+		optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
 		env.reset()
 		behavior_name = list(env.behavior_specs)[0]
+		buffer, cumulative_rewards = self.generate_trajectories(env, buffer_size, epsilon)
+		self.fit_buffer(buffer, optimizer)
+
+	def fit_buffer(
+			self,
+			buffer: ReplayBuffer,
+			optimizer: torch.optim,
+			batch_size: int = 256,
+			num_epoch: int = 3,
+			gamma: float = 0.9,
+	):
+		"""
+		Performs an update of the Q-Network using the provided optimizer and buffer
+		"""
+		batch_size = min(len(buffer), batch_size)
+		batches = buffer.get_batch_generator(batch_size, randomize=True)
+		for _ in range(num_epoch):
+			for batch in batches:
+				predictions = self._obs_forward_to_logits(batch.obs)
+				targets = self._obs_forward_to_logits(batch.next_obs)
+				self.update_weights(batch, predictions, targets, optimizer, gamma)
+
+	def _compute_continuous_loss(self, batch: BatchExperience, predictions, targets, gamma: float) -> torch.Tensor:
+		if torch.numel(batch.continuous_actions) == 0:
+			continuous_loss = 0.0
+		else:
+			targets = (
+					batch.rewards
+					+ (1.0 - batch.terminals)
+					* gamma
+					* targets
+			).to(self.device)
+			continuous_loss = self.continuous_criterion(predictions, targets)
+		return continuous_loss
+
+	def _compute_discrete_loss(self, batch: BatchExperience, predictions, targets, gamma: float) -> torch.Tensor:
+		if torch.numel(batch.discrete_actions) == 0:
+			discrete_loss = 0.0
+		else:
+			targets = (
+					batch.rewards
+					+ (1.0 - batch.terminals)
+					* gamma
+					* targets
+			).to(self.device)
+			discrete_loss = self.discrete_criterion(predictions, targets)
+		return discrete_loss
+
+	def update_weights(self, batch: BatchExperience, predictions, targets, optimizer, gamma: float):
+		assert torch.numel(batch.continuous_actions) + torch.numel(batch.discrete_actions) > 0
+		continuous_loss = self._compute_continuous_loss(batch, predictions[0], targets[0], gamma)
+		discrete_loss = self._compute_discrete_loss(batch, predictions[1], targets[1], gamma)
+		loss = continuous_loss + discrete_loss
+		# Perform the backpropagation
+		optimizer.zero_grad()
+		loss.backward()
+		optimizer.step()
+
+	@staticmethod
+	def actions_to_tensors(actions: Iterable[ActionTuple]) -> Tuple[torch.Tensor, torch.Tensor]:
+		"""
+		:param actions: shape: (batch_size, ...)
+		:return: continuous actions, discrete actions
+		"""
+		return torch.from_numpy(actions.continuous), torch.from_numpy(actions.discrete)
 
 	@staticmethod
 	def _exec_terminal_steps(
@@ -431,7 +511,7 @@ class SNN(torch.nn.Module):
 			last_experience = Experience(
 				obs=deepcopy(agent_maps.last_obs[agent_id_terminated]),
 				reward=terminal_steps[agent_id_terminated].reward,
-				done=not terminal_steps[agent_id_terminated].interrupted,
+				terminal=not terminal_steps[agent_id_terminated].interrupted,
 				action=deepcopy(agent_maps.last_action[agent_id_terminated]),
 				next_obs=terminal_steps[agent_id_terminated].obs,
 			)
@@ -464,7 +544,7 @@ class SNN(torch.nn.Module):
 				exp = Experience(
 					obs=deepcopy(agent_maps.last_obs[agent_id_decisions]),
 					reward=decision_steps[agent_id_decisions].reward,
-					done=False,
+					terminal=False,
 					action=deepcopy(agent_maps.last_action[agent_id_decisions]),
 					next_obs=decision_steps[agent_id_decisions].obs,
 				)
@@ -499,17 +579,14 @@ class SNN(torch.nn.Module):
 			env.step()
 		return buffer, cumulative_rewards
 
-	def update_weights(self):
-		raise NotImplementedError()
-
 	def _create_checkpoint_path(self, epoch: int = -1):
-		return f"./{self.checkpoint_folder}/{self.model_name}{SNN.SUFFIX_SEP}{SNN.CHECKPOINT_EPOCH_KEY}{epoch}{SNN.SAVE_EXT}"
+		return f"./{self.checkpoint_folder}/{self.model_name}{SNNAgent.SUFFIX_SEP}{SNNAgent.CHECKPOINT_EPOCH_KEY}{epoch}{SNNAgent.SAVE_EXT}"
 
 	def _create_new_checkpoint_meta(self, epoch: int, best: bool = False) -> dict:
 		save_path = self._create_checkpoint_path(epoch)
-		new_info = {SNN.CHECKPOINT_EPOCHS_KEY: {epoch: save_path}}
+		new_info = {SNNAgent.CHECKPOINT_EPOCHS_KEY: {epoch: save_path}}
 		if best:
-			new_info[SNN.CHECKPOINT_BEST_KEY] = save_path
+			new_info[SNNAgent.CHECKPOINT_BEST_KEY] = save_path
 		return new_info
 
 	def save_checkpoint(
@@ -522,10 +599,10 @@ class SNN(torch.nn.Module):
 		os.makedirs(self.checkpoint_folder, exist_ok=True)
 		save_path = self._create_checkpoint_path(epoch)
 		torch.save({
-			SNN.CHECKPOINT_EPOCH_KEY: epoch,
-			SNN.CHECKPOINT_STATE_DICT_KEY: self.state_dict(),
-			SNN.CHECKPOINT_OPTIMIZER_STATE_DICT_KEY: optimizer.state_dict(),
-			SNN.CHECKPOINT_LOSS_KEY: epoch_losses,
+			SNNAgent.CHECKPOINT_EPOCH_KEY: epoch,
+			SNNAgent.CHECKPOINT_STATE_DICT_KEY: self.state_dict(),
+			SNNAgent.CHECKPOINT_OPTIMIZER_STATE_DICT_KEY: optimizer.state_dict(),
+			SNNAgent.CHECKPOINT_LOSS_KEY: epoch_losses,
 		}, save_path)
 		self.save_checkpoints_meta(self._create_new_checkpoint_meta(epoch, best))
 
@@ -535,11 +612,11 @@ class SNN(torch.nn.Module):
 			load_checkpoint_mode: LoadCheckpointMode = LoadCheckpointMode.BEST_EPOCH
 	) -> str:
 		if load_checkpoint_mode == load_checkpoint_mode.BEST_EPOCH:
-			return checkpoints_meta[SNN.CHECKPOINT_BEST_KEY]
+			return checkpoints_meta[SNNAgent.CHECKPOINT_BEST_KEY]
 		elif load_checkpoint_mode == load_checkpoint_mode.LAST_EPOCH:
-			epochs_dict = checkpoints_meta[SNN.CHECKPOINT_EPOCHS_KEY]
+			epochs_dict = checkpoints_meta[SNNAgent.CHECKPOINT_EPOCHS_KEY]
 			last_epoch: int = max([int(e) for e in epochs_dict])
-			return checkpoints_meta[SNN.CHECKPOINT_EPOCHS_KEY][str(last_epoch)]
+			return checkpoints_meta[SNNAgent.CHECKPOINT_EPOCHS_KEY][str(last_epoch)]
 		else:
 			raise ValueError()
 
@@ -547,9 +624,9 @@ class SNN(torch.nn.Module):
 		history = LossHistory()
 		with open(self.checkpoints_meta_path, "r+") as jsonFile:
 			meta: dict = json.load(jsonFile)
-		checkpoints = [torch.load(path) for path in meta[SNN.CHECKPOINT_EPOCHS_KEY].values()]
+		checkpoints = [torch.load(path) for path in meta[SNNAgent.CHECKPOINT_EPOCHS_KEY].values()]
 		for checkpoint in checkpoints:
-			history.concat(checkpoint[SNN.CHECKPOINT_LOSS_KEY])
+			history.concat(checkpoint[SNNAgent.CHECKPOINT_LOSS_KEY])
 		return history
 
 	def load_checkpoint(
@@ -560,7 +637,7 @@ class SNN(torch.nn.Module):
 			info: dict = json.load(jsonFile)
 		path = self.get_save_path_from_checkpoints(info, load_checkpoint_mode)
 		checkpoint = torch.load(path)
-		self.load_state_dict(checkpoint[SNN.CHECKPOINT_STATE_DICT_KEY], strict=True)
+		self.load_state_dict(checkpoint[SNNAgent.CHECKPOINT_STATE_DICT_KEY], strict=True)
 		return checkpoint
 
 	def to_onnx(self, in_viz=None):
@@ -590,13 +667,13 @@ if __name__ == '__main__':
 	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
 	env = UnityEnvironment(file_name=None, seed=42, side_channels=[])
 	env.reset()
-	snn = SNN(
+	snn = SNNAgent(
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
 		n_hidden_neurons=128,
 		int_time_steps=10,
 		input_transform=[
 			Compose([
-				Lambda(lambda a: torch.from_numpy(a)),
+				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
 				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
 				Lambda(lambda t: torch.flatten(t, start_dim=1))
 			]),
@@ -605,6 +682,7 @@ if __name__ == '__main__':
 			])
 		]
 	)
+	snn.fit(env, 32)
 	_, hist = snn.generate_trajectories(env, 1024, 0.0)
 	env.close()
 	plt.plot(hist)
