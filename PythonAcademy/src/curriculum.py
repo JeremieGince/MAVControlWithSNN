@@ -1,6 +1,6 @@
-from typing import List, NamedTuple
+from typing import Callable, List, NamedTuple
 
-from PythonAcademy.utils import TrainingHistory
+from PythonAcademy.src.utils import TrainingHistory
 
 
 class CompletionCriteria(NamedTuple):
@@ -13,10 +13,11 @@ class CompletionCriteria(NamedTuple):
 
 
 class Lesson:
-	def __init__(self, name, completion_criteria: CompletionCriteria):
+	def __init__(self, name, completion_criteria: CompletionCriteria, teacher: Callable = None):
 		self.name = name
 		self.completion_criteria = completion_criteria
 		self._num_iterations = 0
+		self._teacher = teacher
 
 	def start(self):
 		"""

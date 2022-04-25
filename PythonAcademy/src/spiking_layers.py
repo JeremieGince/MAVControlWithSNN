@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from PythonAcademy.spike_funcs import HeavisideSigmoidApprox, SpikeFunction
+from PythonAcademy.src.spike_funcs import HeavisideSigmoidApprox, SpikeFunction
 
 
 class LayerType(enum.Enum):

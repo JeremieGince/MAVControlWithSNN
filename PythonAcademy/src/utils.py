@@ -118,15 +118,35 @@ class TrainingHistory:
 	def append(self, key, value):
 		self.container[key].append(value)
 
-	def min(self, key='val'):
+	def min(self, key=None):
+		if key is None:
+			key = list(self.container.keys())[0]
 		if key in self:
 			return min(self[key])
 		return np.inf
 
-	def min_item(self, key='val'):
+	def min_item(self, key=None):
+		if key is None:
+			key = list(self.container.keys())[0]
 		if key in self:
 			argmin = np.argmin(self[key])
 			return {k: v[argmin] for k, v in self.items()}
+		raise ValueError("key not in container")
+
+	def max(self, key=None):
+		if key is None:
+			key = list(self.container.keys())[0]
+		if key in self:
+			return max(self[key])
+		return -np.inf
+
+	def max_item(self, key=None):
+		if key is None:
+			key = list(self.container.keys())[0]
+		if key in self:
+			argmax = np.argmax(self[key])
+			return {k: v[argmax] for k, v in self.items()}
+		raise ValueError("key not in container")
 	
 	@staticmethod
 	def _set_default_plot_kwargs(kwargs: dict):
@@ -174,4 +194,9 @@ def to_tensor(x, dtype=torch.float32):
 	elif not isinstance(x, torch.Tensor):
 		return torch.tensor(x, dtype=dtype)
 	return x.type(dtype)
+
+
+def linear_decay(init_value, min_value, decay_value, current_itr):
+	return max(init_value * decay_value ** current_itr, min_value)
+
 

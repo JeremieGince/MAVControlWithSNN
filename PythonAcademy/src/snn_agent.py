@@ -1,14 +1,15 @@
 import json
 import os
+import shutil
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, DefaultDict, Dict, Iterable, List, NamedTuple, Sequence, Tuple, Type, Union
+from typing import Any, Callable, DefaultDict, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Type, Union
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import tqdm as tqdm
+from tqdm.auto import tqdm
 from mlagents_envs.environment import UnityEnvironment
 from torch import Tensor, nn
 import torch.nn.functional as F
@@ -17,10 +18,10 @@ import enum
 
 from torchvision.transforms import ToTensor, Compose, Lambda
 
-from PythonAcademy.buffers import BatchExperience, Experience, ReplayBuffer, Trajectory
-from PythonAcademy.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
-from PythonAcademy.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
-from PythonAcademy.utils import TrainingHistory, mapping_update_recursively, to_tensor
+from PythonAcademy.src.buffers import BatchExperience, Experience, ReplayBuffer, Trajectory
+from PythonAcademy.src.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
+from PythonAcademy.src.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
+from PythonAcademy.src.utils import TrainingHistory, linear_decay, mapping_update_recursively, to_tensor
 
 
 class AgentsHistoryMaps:
@@ -42,8 +43,8 @@ class AgentsHistoryMaps:
 
 
 class LoadCheckpointMode(enum.Enum):
-	BEST_EPOCH = enum.auto()
-	LAST_EPOCH = enum.auto()
+	BEST_ITR = enum.auto()
+	LAST_ITR = enum.auto()
 
 
 class SNNAgent(torch.nn.Module):
@@ -54,9 +55,10 @@ class SNNAgent(torch.nn.Module):
 	CHECKPOINT_BEST_KEY = "best"
 	CHECKPOINT_ITRS_KEY = "iterations"
 	CHECKPOINT_ITR_KEY = "itr"
-	CHECKPOINT_REWARDS_KEY = 'rewards'
+	CHECKPOINT_METRICS_KEY = 'rewards'
 	CHECKPOINT_OPTIMIZER_STATE_DICT_KEY = "optimizer_state_dict"
 	CHECKPOINT_STATE_DICT_KEY = "model_state_dict"
+	CHECKPOINT_TRAINING_HISTORY_KEY = "training_history"
 	CHECKPOINT_FILE_STRUCT: Dict[str, Union[str, Dict[int, str]]] = {
 		CHECKPOINT_BEST_KEY: CHECKPOINT_SAVE_PATH_KEY,
 		CHECKPOINT_ITRS_KEY: {0: CHECKPOINT_SAVE_PATH_KEY},
@@ -66,6 +68,7 @@ class SNNAgent(torch.nn.Module):
 	def __init__(
 			self,
 			spec: BehaviorSpec,
+			behavior_name: str,
 			n_hidden_neurons: Union[Iterable[int], int] = None,
 			use_recurrent_connection: Union[bool, Iterable[bool]] = True,
 			int_time_steps: int = None,
@@ -96,6 +99,7 @@ class SNNAgent(torch.nn.Module):
 
 		self.checkpoint_folder = checkpoint_folder
 		self.model_name = model_name
+		self.behavior_name = behavior_name
 
 		if isinstance(n_hidden_neurons, int):
 			n_hidden_neurons = [n_hidden_neurons]
@@ -122,7 +126,10 @@ class SNNAgent(torch.nn.Module):
 
 	@property
 	def checkpoints_meta_path(self) -> str:
-		return f"{self.checkpoint_folder}/{self.model_name}{SNNAgent.SUFFIX_SEP}{SNNAgent.CHECKPOINTS_META_SUFFIX}.json"
+		full_filename = (
+			f"{self.model_name}_{self.behavior_name}{SNNAgent.SUFFIX_SEP}{SNNAgent.CHECKPOINTS_META_SUFFIX}"
+		)
+		return f"{self.checkpoint_folder}/{full_filename}.json"
 
 	@property
 	def input_sizes(self) -> Dict[str, int]:
@@ -373,6 +380,8 @@ class SNNAgent(torch.nn.Module):
 		:param actions: shape: (batch_size, ...)
 		:return:
 		"""
+		# TODO: quelque chose de weird se passe ici avec les shapes.
+		#  Vérifier que c'est les bonne actions qu'on met dans la liste
 		actions_list = []
 		continuous, discrete = actions.continuous, actions.discrete
 		batch_size = actions.continuous.shape[0] if continuous is not None else discrete.shape[0]
@@ -385,38 +394,107 @@ class SNNAgent(torch.nn.Module):
 			)
 		return actions_list
 
+	@staticmethod
+	def _set_default_fit_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+		kwargs.setdefault("close_env", True)
+		kwargs.setdefault("n_epochs", 3)
+		kwargs.setdefault("init_lr", 3.0e-4)
+		kwargs.setdefault("min_lr", 3.0e-4)
+		kwargs.setdefault("init_epsilon", 0.99)
+		kwargs.setdefault("epsilon_decay", 0.999)
+		kwargs.setdefault("min_epsilon", 0.01)
+		kwargs.setdefault("gamma", 0.99)
+		kwargs.setdefault("tau", 0.01)
+		kwargs.setdefault("n_batches", 3)
+		kwargs.setdefault("update_freq", 5)
+		return kwargs
+
 	def fit(
 			self,
 			env: BaseEnv,
-			num_iterations: int = 100,
-			buffer_size: int = 4096,
-			epsilon: float = 0.2,
-			init_lr: float = 3.0e-4,
+			num_iterations: int = int(1e6),
+			buffer_size: int = int(2**14),
 			batch_size: int = 256,
-			num_epochs: int = 3,
-			gamma: float = 0.99,
-			tau: float = 1e-2,
+			load_checkpoint_mode: LoadCheckpointMode = None,
+			force_overwrite: bool = False,
+			save_freq: int = int(1e2),
 			verbose: bool = True,
+			**kwargs
 	) -> TrainingHistory:
-		optimizer = torch.optim.Adam(self.parameters(), lr=init_lr)
-		env.reset()
-		behavior_name = list(env.behavior_specs)[0]
-		
+		# TODO: add learning rate decay
+		# TODO: add curriculum learning
+		kwargs = self._set_default_fit_kwargs(kwargs)
+		assert batch_size <= buffer_size
+		assert batch_size > 0
+		optimizer = torch.optim.Adam(self.parameters(), lr=kwargs["init_lr"])
+
+		start_itr = 0
+		if load_checkpoint_mode is None:
+			if os.path.exists(self.checkpoints_meta_path):
+				if force_overwrite:
+					shutil.rmtree(self.checkpoint_folder)
+				else:
+					raise ValueError(
+						f"{self.checkpoints_meta_path} already exists. "
+						f"Set force_overwrite flag to True to overwrite existing saves."
+					)
+		else:
+			try:
+				checkpoint = self.load_checkpoint(load_checkpoint_mode)
+				self.load_state_dict(checkpoint[SNNAgent.CHECKPOINT_STATE_DICT_KEY], strict=True)
+				optimizer.load_state_dict(checkpoint[SNNAgent.CHECKPOINT_OPTIMIZER_STATE_DICT_KEY])
+				start_itr = int(checkpoint[SNNAgent.CHECKPOINT_ITR_KEY]) + 1
+				# self.training_history = self.get_checkpoints_training_history()
+				self.training_history: TrainingHistory = checkpoint[SNNAgent.CHECKPOINT_TRAINING_HISTORY_KEY]
+			except FileNotFoundError:
+				if verbose:
+					warnings.warn("No such checkpoint. Fit from beginning.")
+
 		target_network = deepcopy(self)
-		p_bar = tqdm.tqdm(range(num_iterations), disable=not verbose, desc="Training")
+		best_rewards = self.training_history.max("Rewards")
+		env.reset()
+		buffer, _ = self.generate_trajectories(
+			env, batch_size, epsilon=kwargs["init_epsilon"], verbose=verbose, **kwargs
+		)
+		p_bar = tqdm(range(start_itr, num_iterations), disable=not verbose, desc="Training")
 		for i in p_bar:
-			buffer, cumulative_rewards = self.generate_trajectories(env, buffer_size, epsilon, verbose=False)
-			cum_rewards = np.mean(cumulative_rewards)
-			self.training_history.append("Rewards", cum_rewards)
-			itr_loss = self.fit_buffer(buffer, target_network, optimizer, batch_size, num_epochs, gamma, tau)
-			self.training_history.append("Loss", itr_loss)
-			# TODO: update saving pipeline
-			# self.save_checkpoint(optimizer, epoch, epoch_loss, is_best)
-			p_bar.set_postfix(loss=f"{itr_loss:.3f}", cum_rewards=f"{cum_rewards:.3f}")
-			p_bar.update()
+			epsilon = linear_decay(kwargs["init_epsilon"], kwargs["min_epsilon"], kwargs["epsilon_decay"], i)
+			itr_metrics = self._exec_fit_itr_(target_network, optimizer, env, epsilon, buffer, batch_size, **kwargs)
+			self.training_history.concat(itr_metrics)
+			p_bar.set_postfix(
+				loss=f"{itr_metrics['Loss']:.3f}",
+				cum_rewards=f"{itr_metrics['Rewards']:.3f}",
+				best_rewards=f"{best_rewards:.3f}"
+			)
+			if i % save_freq == 0:
+				is_best = itr_metrics["Rewards"] > best_rewards
+				if is_best:
+					best_rewards = itr_metrics["Rewards"]
+				self.save_checkpoint(i, itr_metrics, target_network, optimizer, is_best)
+				self.plot_training_history(show=False)
 		p_bar.close()
+		if kwargs.get("close_env", True):
+			env.close()
 		self.hard_update(target_network)
+		self.plot_training_history(show=False)
 		return self.training_history
+
+	def _exec_fit_itr_(
+			self,
+			target_network: 'SNNAgent',
+			optimizer: torch.optim.Optimizer,
+			env: BaseEnv,
+			epsilon: float,
+			buffer: ReplayBuffer,
+			batch_size: int,
+			**kwargs
+	) -> Dict[str, float]:
+		buffer, cumulative_rewards = self.generate_trajectories(
+			env, kwargs["update_freq"], buffer, epsilon, verbose=False, p_bar_position=0, **kwargs
+		)
+		cum_rewards = np.mean(cumulative_rewards)
+		itr_loss = self.fit_buffer(buffer, target_network, optimizer, batch_size, **kwargs)
+		return dict(Rewards=cum_rewards, Loss=itr_loss)
 
 	def fit_buffer(
 			self,
@@ -424,22 +502,21 @@ class SNNAgent(torch.nn.Module):
 			target_network: 'SNNAgent',
 			optimizer: torch.optim,
 			batch_size: int = 256,
-			num_epoch: int = 3,
-			gamma: float = 0.9,
-			tau: float = 0.01,
+			**kwargs
 	) -> float:
+		kwargs = self._set_default_fit_kwargs(kwargs)
 		"""
 		Performs an update of the Q-Network using the provided optimizer and buffer
 		"""
 		batch_size = min(len(buffer), batch_size)
-		batches = buffer.get_batch_generator(batch_size, randomize=True, device=self.device)
+		batches = buffer.get_batch_generator(batch_size, kwargs["n_batches"], randomize=True, device=self.device)
 		losses = []
-		for _ in range(num_epoch):
+		for _ in range(kwargs["n_epochs"]):
 			for batch in batches:
 				predictions = self._obs_forward_to_logits(batch.obs)
 				targets = target_network._obs_forward_to_logits(batch.next_obs)
-				loss = self.update_weights(batch, predictions, targets, optimizer, gamma)
-				target_network.soft_update(self, tau=tau)
+				loss = self.update_weights(batch, predictions, targets, optimizer, kwargs["gamma"])
+				target_network.soft_update(self, tau=kwargs["tau"])
 				losses.append(loss)
 		return float(np.mean(losses))
 
@@ -505,7 +582,7 @@ class SNNAgent(torch.nn.Module):
 		self.load_state_dict(other.state_dict())
 
 	@staticmethod
-	def _exec_terminal_steps(
+	def exec_terminal_steps_(
 			agent_maps: AgentsHistoryMaps,
 			buffer: ReplayBuffer,
 			terminal_steps: TerminalSteps
@@ -539,10 +616,11 @@ class SNNAgent(torch.nn.Module):
 			)
 			# Add the Trajectory to the buffer
 			buffer.extend(agent_maps.trajectories.pop(agent_id_terminated))
+			buffer.increment_counter()
 		return cumulative_rewards
 
 	@staticmethod
-	def _exec_decisions_steps(agent_maps: AgentsHistoryMaps, decision_steps: DecisionSteps):
+	def exec_decisions_steps_(agent_maps: AgentsHistoryMaps, decision_steps: DecisionSteps):
 		"""
 		Execute the decision steps of the agents
 		:param agent_maps: The AgentMaps
@@ -570,29 +648,37 @@ class SNNAgent(torch.nn.Module):
 	def generate_trajectories(
 			self,
 			env: BaseEnv,
-			buffer_size: int,
-			epsilon: float,
-			verbose: bool = False
+			n_trajectories: int,
+			buffer: Optional[ReplayBuffer] = None,
+			epsilon: float = 0.0,
+			verbose: bool = False,
+			p_bar_position: int = 0,
+			**kwargs
 	) -> Tuple[ReplayBuffer, List[float]]:
-		buffer = ReplayBuffer(buffer_size)
+		kwargs = self._set_default_fit_kwargs(kwargs)
+		if buffer is None:
+			buffer = ReplayBuffer(n_trajectories)
 		env.reset()
 		behavior_name = list(env.behavior_specs)[0]
 		agent_maps = AgentsHistoryMaps()
 		cumulative_rewards: List[float] = []
-		p_bar = tqdm.tqdm(total=buffer_size-len(buffer), disable=not verbose, desc="Generating Trajectories")
-		last_len_buffer = len(buffer)
-		while len(buffer) < buffer_size:  # While not enough data in the buffer
+		p_bar = tqdm(
+			total=n_trajectories, disable=not verbose, desc="Generating Trajectories", position=p_bar_position
+		)
+		last_buffer_counter = 0
+		buffer.reset_counter()
+		while buffer.counter < n_trajectories:  # While not enough data in the buffer
 			decision_steps, terminal_steps = env.get_steps(behavior_name)
-			cumulative_rewards.extend(self._exec_terminal_steps(agent_maps, buffer, terminal_steps))
+			cumulative_rewards.extend(self.exec_terminal_steps_(agent_maps, buffer, terminal_steps))
 			if len(decision_steps) > 0:
-				self._exec_decisions_steps(agent_maps, decision_steps)
+				self.exec_decisions_steps_(agent_maps, decision_steps)
 				actions = self.get_actions(self.obs_to_inputs(decision_steps.obs), epsilon)
 				actions_list = self.unbatch_actions(actions)
 				for agent_index, agent_id in enumerate(decision_steps.agent_id):
 					agent_maps.last_action[agent_id] = actions_list[agent_index]
 				env.set_actions(behavior_name, actions)
-			p_bar.update(len(buffer) - last_len_buffer)
-			last_len_buffer = len(buffer)
+			p_bar.update(min(buffer.counter - last_buffer_counter, n_trajectories - last_buffer_counter))
+			last_buffer_counter = buffer.counter
 			env.step()
 		p_bar.close()
 		return buffer, cumulative_rewards
@@ -600,57 +686,60 @@ class SNNAgent(torch.nn.Module):
 	def _create_checkpoint_path(self, epoch: int = -1):
 		return f"./{self.checkpoint_folder}/{self.model_name}{SNNAgent.SUFFIX_SEP}{SNNAgent.CHECKPOINT_ITR_KEY}{epoch}{SNNAgent.SAVE_EXT}"
 
-	def _create_new_checkpoint_meta(self, epoch: int, best: bool = False) -> dict:
-		save_path = self._create_checkpoint_path(epoch)
-		new_info = {SNNAgent.CHECKPOINT_ITRS_KEY: {epoch: save_path}}
+	def _create_new_checkpoint_meta(self, itr: int, best: bool = False) -> dict:
+		save_path = self._create_checkpoint_path(itr)
+		new_info = {SNNAgent.CHECKPOINT_ITRS_KEY: {itr: save_path}}
 		if best:
 			new_info[SNNAgent.CHECKPOINT_BEST_KEY] = save_path
 		return new_info
 
 	def save_checkpoint(
 			self,
-			optimizer,
-			epoch: int,
-			epoch_losses: Dict[str, Any],
+			itr: int,
+			itr_metrics: Dict[str, Any],
+			network=None,
+			optimizer=None,
 			best: bool = False,
 	):
-		# TODO: update to contain rewards and full training history
+		if network is None:
+			network = self
 		os.makedirs(self.checkpoint_folder, exist_ok=True)
-		save_path = self._create_checkpoint_path(epoch)
+		save_path = self._create_checkpoint_path(itr)
 		torch.save({
-			SNNAgent.CHECKPOINT_ITR_KEY                 : epoch,
-			SNNAgent.CHECKPOINT_STATE_DICT_KEY          : self.state_dict(),
-			SNNAgent.CHECKPOINT_OPTIMIZER_STATE_DICT_KEY: optimizer.state_dict(),
-			SNNAgent.CHECKPOINT_REWARDS_KEY             : epoch_losses,
+			SNNAgent.CHECKPOINT_ITR_KEY                 : itr,
+			SNNAgent.CHECKPOINT_STATE_DICT_KEY          : network.state_dict(),
+			SNNAgent.CHECKPOINT_OPTIMIZER_STATE_DICT_KEY: optimizer.state_dict() if optimizer is not None else None,
+			SNNAgent.CHECKPOINT_METRICS_KEY             : itr_metrics,
+			SNNAgent.CHECKPOINT_TRAINING_HISTORY_KEY    : self.training_history,
 		}, save_path)
-		self.save_checkpoints_meta(self._create_new_checkpoint_meta(epoch, best))
+		self.save_checkpoints_meta(self._create_new_checkpoint_meta(itr, best))
 
 	@staticmethod
 	def get_save_path_from_checkpoints(
 			checkpoints_meta: Dict[str, Union[str, Dict[Any, str]]],
-			load_checkpoint_mode: LoadCheckpointMode = LoadCheckpointMode.BEST_EPOCH
+			load_checkpoint_mode: LoadCheckpointMode = LoadCheckpointMode.BEST_ITR
 	) -> str:
-		if load_checkpoint_mode == load_checkpoint_mode.BEST_EPOCH:
+		if load_checkpoint_mode == load_checkpoint_mode.BEST_ITR:
 			return checkpoints_meta[SNNAgent.CHECKPOINT_BEST_KEY]
-		elif load_checkpoint_mode == load_checkpoint_mode.LAST_EPOCH:
-			epochs_dict = checkpoints_meta[SNNAgent.CHECKPOINT_ITRS_KEY]
-			last_epoch: int = max([int(e) for e in epochs_dict])
-			return checkpoints_meta[SNNAgent.CHECKPOINT_ITRS_KEY][str(last_epoch)]
+		elif load_checkpoint_mode == load_checkpoint_mode.LAST_ITR:
+			itr_dict = checkpoints_meta[SNNAgent.CHECKPOINT_ITRS_KEY]
+			last_itr: int = max([int(e) for e in itr_dict])
+			return checkpoints_meta[SNNAgent.CHECKPOINT_ITRS_KEY][str(last_itr)]
 		else:
 			raise ValueError()
 
-	def get_checkpoints_loss_history(self) -> TrainingHistory:
+	def get_checkpoints_training_history(self) -> TrainingHistory:
 		history = TrainingHistory()
 		with open(self.checkpoints_meta_path, "r+") as jsonFile:
 			meta: dict = json.load(jsonFile)
 		checkpoints = [torch.load(path) for path in meta[SNNAgent.CHECKPOINT_ITRS_KEY].values()]
 		for checkpoint in checkpoints:
-			history.concat(checkpoint[SNNAgent.CHECKPOINT_REWARDS_KEY])
+			history.concat(checkpoint[SNNAgent.CHECKPOINT_METRICS_KEY])
 		return history
 
 	def load_checkpoint(
 			self,
-			load_checkpoint_mode: LoadCheckpointMode = LoadCheckpointMode.BEST_EPOCH
+			load_checkpoint_mode: LoadCheckpointMode = LoadCheckpointMode.BEST_ITR
 	) -> dict:
 		with open(self.checkpoints_meta_path, "r+") as jsonFile:
 			info: dict = json.load(jsonFile)
@@ -681,6 +770,14 @@ class SNNAgent(torch.nn.Module):
 		with open(self.checkpoints_meta_path, "w+") as jsonFile:
 			json.dump(info, jsonFile, indent=4)
 
+	def plot_training_history(self, training_history: TrainingHistory = None, show: bool = False) -> str:
+		if training_history is None:
+			training_history = self.training_history
+		save_path = f"./{self.checkpoint_folder}/training_history.png"
+		os.makedirs(f"./{self.checkpoint_folder}/", exist_ok=True)
+		training_history.plot(save_path, show)
+		return save_path
+
 
 if __name__ == '__main__':
 	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
@@ -694,11 +791,14 @@ if __name__ == '__main__':
 	env = UnityEnvironment(file_name=build_path, seed=42, side_channels=[channel], no_graphics=True)
 	channel.set_float_parameter("batchSize", 4)
 	channel.set_float_parameter("camFollowTargetAgent", False)
-	channel.set_float_parameter("droneMaxStartY", 1.5)
+	channel.set_float_parameter("droneMaxStartY", 1.1)
 	channel.set_float_parameter("observationStacks", integration_time)
+	channel.set_float_parameter("observationWidth", 28)
+	channel.set_float_parameter("observationHeight", 28)
 	env.reset()
 	snn = SNNAgent(
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
+		behavior_name=list(env.behavior_specs)[0].split("?")[0],
 		n_hidden_neurons=256,
 		int_time_steps=integration_time,
 		input_transform=[
@@ -712,7 +812,13 @@ if __name__ == '__main__':
 			])
 		]
 	)
-	hist = snn.fit(env, num_iterations=10, buffer_size=4096, batch_size=128, init_lr=3e-4, tau=0.01, verbose=True)
+	hist = snn.fit(
+		env,
+		num_iterations=int(1e4),
+		verbose=True,
+		load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
+		# force_overwrite=True,
+	)
 	# _, hist = snn.generate_trajectories(env, 1024, 0.0, verbose=True)
-	env.close()
+	# env.close()
 	hist.plot(show=True, figsize=(10, 6))

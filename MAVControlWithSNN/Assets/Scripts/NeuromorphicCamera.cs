@@ -255,8 +255,7 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
     // Start is called before the first frame update
     void Start()
     {
-        environmentParameters = Academy.Instance.EnvironmentParameters;
-        observationStacks = (int)environmentParameters.GetWithDefault("observationStacks", (float)observationStacks);
+        SetParameters();
         SetCamera();
         m_TextureInput = new Texture2D(cameraInput.pixelWidth, cameraInput.pixelHeight, TextureFormat.RGBA32, mipChain: false);
     }
@@ -265,6 +264,13 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
     private void SetCamera() {
         cameraInput = GetComponent<Camera>();
         //cameraInput.targetTexture = new RenderTexture(cameraInput.targetTexture);
+    }
+
+    private void SetParameters() {
+        environmentParameters = Academy.Instance.EnvironmentParameters;
+        observationStacks = (int)environmentParameters.GetWithDefault("observationStacks", (float)observationStacks);
+        width = (int)environmentParameters.GetWithDefault("observationWidth", (float)width);
+        height = (int)environmentParameters.GetWithDefault("observationHeight", (float)height);
     }
 
     // Update is called once per frame
@@ -292,6 +298,7 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
 
     public override ISensor[] CreateSensors() {
         Dispose();
+        SetParameters();
         SetCamera();
         sensor = new NeuromorphicCameraSensor(cameraInput, sensorName, width, height, threshold);
 
