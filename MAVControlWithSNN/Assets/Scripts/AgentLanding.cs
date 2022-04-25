@@ -30,14 +30,14 @@ public class AgentLanding : Agent
     [SerializeField] private float divergenceSetPoint = 1f;
     [SerializeField] private float droneMinStartY = 1f;
     [SerializeField] private float droneMaxStartY = 100f;
-    [SerializeField] private bool useYAxisAsParameter = true;
+    [SerializeField] private bool usePositionAsInput = true;
     [SerializeField] private float propelersConstForce = 0f;
     [SerializeField] private bool useForceRatio = true;
     [SerializeField] private float properlersForce;
     [SerializeField] private float targetLandingVelocity = 1f;
 
     [Header("Processing Parameters")]
-    [SerializeField] private bool divergenceAsOnHot = true;
+    [SerializeField] private bool divergenceAsOneHot = true;
     [SerializeField] private int divergenceBins = 20;
     [SerializeField] private int divergenceBinSize = 10;
 
@@ -101,9 +101,9 @@ public class AgentLanding : Agent
         spaceSize += enableDisplacement ? 3 : 0;
         spaceSize += enableTorque ? 3 : 0;
         if (enableDivergence) {
-            spaceSize += divergenceAsOnHot ? divergenceBins : 1;
+            spaceSize += divergenceAsOneHot ? divergenceBins : 1;
         }
-        spaceSize += useYAxisAsParameter ? 1 : 0;
+        spaceSize += usePositionAsInput ? 3 : 0;
         behaviorParameters.BrainParameters.VectorObservationSize = spaceSize;
         behaviorParameters.BrainParameters.NumStackedVectorObservations = 1;
     }
@@ -148,7 +148,7 @@ public class AgentLanding : Agent
         divergenceSetPoint = environmentParameters.GetWithDefault("divergenceSetPoint", divergenceSetPoint);
         droneMinStartY = environmentParameters.GetWithDefault("droneMinStartY", droneMinStartY);
         droneMaxStartY = environmentParameters.GetWithDefault("droneMaxStartY", droneMaxStartY);
-        useYAxisAsParameter = AsBool(environmentParameters.GetWithDefault("useYAxisAsParameter", System.Convert.ToSingle(useYAxisAsParameter)));
+        usePositionAsInput = AsBool(environmentParameters.GetWithDefault("usePositionAsInput", System.Convert.ToSingle(usePositionAsInput)));
         propelersConstForce = environmentParameters.GetWithDefault("propelersConstForce", propelersConstForce);
         useForceRatio = AsBool(environmentParameters.GetWithDefault("useForceRatio", System.Convert.ToSingle(useForceRatio)));
         properlersForce = environmentParameters.GetWithDefault("properlersForce", properlersForce);
@@ -156,7 +156,7 @@ public class AgentLanding : Agent
 
 
         // Processing parameters
-        divergenceAsOnHot = AsBool(environmentParameters.GetWithDefault("divergenceAsOnHot", System.Convert.ToSingle(divergenceAsOnHot)));
+        divergenceAsOneHot = AsBool(environmentParameters.GetWithDefault("divergenceAsOneHot", System.Convert.ToSingle(divergenceAsOneHot)));
         divergenceBins = (int)environmentParameters.GetWithDefault("divergenceBins", (float)divergenceBins);
         divergenceBinSize = (int)environmentParameters.GetWithDefault("divergenceBinSize", (float)divergenceBinSize);
     }
@@ -171,6 +171,9 @@ public class AgentLanding : Agent
 
         InitializePropelers();
         startPosition = transform.localPosition;
+
+        divergenceCamera.gameObject.SetActive(enableDivergence);
+        neuromorphicCamera.gameObject.SetActive(enableNeuromorphicCamera);
     }
 
     public override void OnEpisodeBegin() {
@@ -184,8 +187,8 @@ public class AgentLanding : Agent
 
 
     public override void CollectObservations(VectorSensor sensor) {
-        if (useYAxisAsParameter) {
-            sensor.AddObservation(droneRigidbody.transform.localPosition.y);
+        if (usePositionAsInput) {
+            sensor.AddObservation(droneRigidbody.transform.localPosition);
         }
         if (enableDisplacement) {
             sensor.AddObservation(targetTransform.localPosition - transform.localPosition);
@@ -195,18 +198,12 @@ public class AgentLanding : Agent
         }
 
         if (enableDivergence) {
-            float divergence = (float)(divergenceCamera?.UpdateState());
-            if (divergenceAsOnHot) {
+            if (divergenceAsOneHot) {
                 sensor.AddOneHotObservation(GetDivergenceBinIndex(divergenceCamera.GetDivergence()), divergenceBins);
             }
             else {
                 sensor.AddObservation(divergenceCamera.GetDivergence());
             }
-        }
-
-        if (enableNeuromorphicCamera) {
-            //neuromorphicCamera?.UpdateState();
-            //sensor.AddObservation();
         }
 
     }
