@@ -91,4 +91,5 @@ MonoBehaviour:
   sensorName: NeuromorphicCamera
   width: 84
   height: 84
-  observationStacks: 1
+  threshold: 10
+  observationStacks: 100
