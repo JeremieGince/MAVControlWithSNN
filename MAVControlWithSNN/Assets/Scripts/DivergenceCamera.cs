@@ -20,7 +20,7 @@ public class DivergenceCamera : MonoBehaviour
     private cv2.Point2f[] currKeypoints;
     private float prevRenderTime = 0f;
     private float currRanderTime = 0f;
-    private float divergence = 0f;
+    private float m_divergence = 0f;
     private bool isReady = false;
 
 
@@ -36,12 +36,16 @@ public class DivergenceCamera : MonoBehaviour
         
     }
 
+    private void FixedUpdate() {
+        UpdateState();
+    }
+
     public bool IsReady() {
         return isReady;
     }
 
     public float GetDivergence() {
-        return divergence;
+        return m_divergence;
     }
 
     public float UpdateState() {
@@ -51,7 +55,7 @@ public class DivergenceCamera : MonoBehaviour
             if (valid) UpdateDivergence();
         }
         UpdatePreviousKeypoints();
-        return divergence;
+        return m_divergence;
     }
 
 
@@ -101,8 +105,8 @@ public class DivergenceCamera : MonoBehaviour
         float D_hat = 0f;
         int N_D = Mathf.Clamp(maxDivergencePoints, 0, Mathf.Min(prevKeypoints.Length, currKeypoints.Length));
         if (N_D == 0) {
-            divergence = 0f;
-            return divergence;
+            m_divergence = 0f;
+            return m_divergence;
         }
 
         float[] prevDistances = new float[N_D];
@@ -116,14 +120,14 @@ public class DivergenceCamera : MonoBehaviour
                 D_hat += (currDistances[i] - prevDistances[i]) / prevDistances[i];
             }
         }
-        divergence = D_hat / (N_D * GetIntegrationTime());
-        if (float.IsNaN(divergence)) {
-            divergence = 0f;
+        m_divergence = D_hat / (N_D * GetIntegrationTime());
+        if (float.IsNaN(m_divergence)) {
+            m_divergence = 0f;
         }
-        else if (float.IsInfinity(divergence)) {
-            divergence = 100f;
+        else if (float.IsInfinity(m_divergence)) {
+            m_divergence = 100f;
         }
-        return divergence;
+        return m_divergence;
     }
 
     /// <summary>
