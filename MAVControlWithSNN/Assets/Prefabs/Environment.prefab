@@ -469,6 +469,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 4899716743291363028, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 5084217423962448781, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: m_IsActive
       value: 0
@@ -487,7 +491,7 @@ PrefabInstance:
       objectReference: {fileID: 6109155461816081806}
     - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: enableDivergence
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: floorMeshRenderer
@@ -497,6 +501,10 @@ PrefabInstance:
       propertyPath: neuromorphicCamera
       value: 
       objectReference: {fileID: 2043969942779586426}
+    - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
+      propertyPath: usePositionAsInput
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 6187081454207548743, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: threshold
       value: 1
