@@ -19,6 +19,7 @@ import enum
 from torchvision.transforms import ToTensor, Compose, Lambda
 
 from PythonAcademy.src.buffers import BatchExperience, Experience, ReplayBuffer, Trajectory
+from PythonAcademy.src.curriculum import Curriculum
 from PythonAcademy.src.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
 from PythonAcademy.src.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
 from PythonAcademy.src.utils import TrainingHistory, linear_decay, mapping_update_recursively, to_tensor
@@ -380,8 +381,6 @@ class SNNAgent(torch.nn.Module):
 		:param actions: shape: (batch_size, ...)
 		:return:
 		"""
-		# TODO: quelque chose de weird se passe ici avec les shapes.
-		#  Vérifier que c'est les bonne actions qu'on met dans la liste
 		actions_list = []
 		continuous, discrete = actions.continuous, actions.discrete
 		batch_size = actions.continuous.shape[0] if continuous is not None else discrete.shape[0]
@@ -398,8 +397,9 @@ class SNNAgent(torch.nn.Module):
 	def _set_default_fit_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
 		kwargs.setdefault("close_env", True)
 		kwargs.setdefault("n_epochs", 3)
-		kwargs.setdefault("init_lr", 3.0e-4)
+		kwargs.setdefault("init_lr", 1e-3)
 		kwargs.setdefault("min_lr", 3.0e-4)
+		kwargs.setdefault("weight_decay", 1e-5)
 		kwargs.setdefault("init_epsilon", 0.99)
 		kwargs.setdefault("epsilon_decay", 0.999)
 		kwargs.setdefault("min_epsilon", 0.01)
@@ -407,6 +407,7 @@ class SNNAgent(torch.nn.Module):
 		kwargs.setdefault("tau", 0.01)
 		kwargs.setdefault("n_batches", 3)
 		kwargs.setdefault("update_freq", 5)
+		kwargs.setdefault("curriculum_strength", 0.5)
 		return kwargs
 
 	def fit(
@@ -415,6 +416,7 @@ class SNNAgent(torch.nn.Module):
 			num_iterations: int = int(1e6),
 			buffer_size: int = int(2**14),
 			batch_size: int = 256,
+			curriculum: Curriculum = None,
 			load_checkpoint_mode: LoadCheckpointMode = None,
 			force_overwrite: bool = False,
 			save_freq: int = int(1e2),
@@ -422,11 +424,10 @@ class SNNAgent(torch.nn.Module):
 			**kwargs
 	) -> TrainingHistory:
 		# TODO: add learning rate decay
-		# TODO: add curriculum learning
 		kwargs = self._set_default_fit_kwargs(kwargs)
 		assert batch_size <= buffer_size
 		assert batch_size > 0
-		optimizer = torch.optim.Adam(self.parameters(), lr=kwargs["init_lr"])
+		optimizer = torch.optim.Adam(self.parameters(), lr=kwargs["init_lr"], weight_decay=kwargs["weight_decay"])
 
 		start_itr = 0
 		if load_checkpoint_mode is None:
@@ -459,13 +460,21 @@ class SNNAgent(torch.nn.Module):
 		p_bar = tqdm(range(start_itr, num_iterations), disable=not verbose, desc="Training")
 		for i in p_bar:
 			epsilon = linear_decay(kwargs["init_epsilon"], kwargs["min_epsilon"], kwargs["epsilon_decay"], i)
+			teacher_loss = self.fit_curriculum_buffer(curriculum, optimizer, batch_size, **kwargs)
 			itr_metrics = self._exec_fit_itr_(target_network, optimizer, env, epsilon, buffer, batch_size, **kwargs)
-			self.training_history.concat(itr_metrics)
-			p_bar.set_postfix(
+			p_bar_postfix = dict(
 				loss=f"{itr_metrics['Loss']:.3f}",
 				cum_rewards=f"{itr_metrics['Rewards']:.3f}",
-				best_rewards=f"{best_rewards:.3f}"
+				best_rewards=f"{best_rewards:.3f}",
 			)
+			if teacher_loss is not None:
+				itr_metrics.update(TeacherLoss=teacher_loss)
+				p_bar_postfix.update(TeacherLoss=f"{teacher_loss:.3f}")
+			self.training_history.concat(itr_metrics)
+			if curriculum is not None:
+				msg = curriculum.on_iteration_end(self.training_history)
+				p_bar_postfix.update(msg)
+			p_bar.set_postfix(p_bar_postfix)
 			if i % save_freq == 0:
 				is_best = itr_metrics["Rewards"] > best_rewards
 				if is_best:
@@ -496,6 +505,35 @@ class SNNAgent(torch.nn.Module):
 		itr_loss = self.fit_buffer(buffer, target_network, optimizer, batch_size, **kwargs)
 		return dict(Rewards=cum_rewards, Loss=itr_loss)
 
+	def fit_curriculum_buffer(
+			self,
+			curriculum: Curriculum,
+			optimizer: torch.optim,
+			batch_size: int,
+			**kwargs
+	) -> Optional[float]:
+		"""
+		Fit the curriculum buffer.
+		:param curriculum:
+		:param optimizer:
+		:param batch_size:
+		:param kwargs:
+		:return:
+		"""
+		kwargs = self._set_default_fit_kwargs(kwargs)
+		buffer = curriculum.teacher_buffer
+		if buffer is None:
+			return None
+		batch_size = min(len(buffer), batch_size)
+		batches = buffer.get_batch_generator(batch_size, kwargs["n_batches"], randomize=True, device=self.device)
+		losses = []
+		for _ in range(kwargs["n_epochs"]):
+			for batch in batches:
+				predictions = self._obs_forward_to_logits(batch.obs)
+				loss = self._behaviour_cloning_update_weights(batch, predictions, optimizer, **kwargs)
+				losses.append(loss)
+		return float(np.mean(losses))
+
 	def fit_buffer(
 			self,
 			buffer: ReplayBuffer,
@@ -519,6 +557,43 @@ class SNNAgent(torch.nn.Module):
 				target_network.soft_update(self, tau=kwargs["tau"])
 				losses.append(loss)
 		return float(np.mean(losses))
+
+	def _behaviour_cloning_compute_continuous_loss(self, batch: BatchExperience, predictions, targets) -> torch.Tensor:
+		if torch.numel(batch.continuous_actions) == 0:
+			continuous_loss = 0.0
+		else:
+			continuous_loss = self.continuous_criterion(predictions, targets.to(self.device))
+		return continuous_loss
+
+	def _behaviour_cloning_compute_discrete_loss(self, batch: BatchExperience, predictions, targets) -> torch.Tensor:
+		if torch.numel(batch.discrete_actions) == 0:
+			discrete_loss = 0.0
+		else:
+			warnings.warn("Discrete loss is not implemented with cross entropy loss. This is a temporary solution.")
+			discrete_loss = self.discrete_criterion(predictions, targets.to(self.device))
+		return discrete_loss
+
+	def _behaviour_cloning_update_weights(
+			self,
+			batch: BatchExperience,
+			predictions: Tuple[torch.Tensor, torch.Tensor],
+			optimizer: torch.optim,
+			**kwargs
+	) -> float:
+		kwargs = self._set_default_fit_kwargs(kwargs)
+		assert torch.numel(batch.continuous_actions) + torch.numel(batch.discrete_actions) > 0
+		continuous_loss = self._behaviour_cloning_compute_continuous_loss(
+			batch, predictions[0], batch.continuous_actions
+		)
+		discrete_loss = self._behaviour_cloning_compute_discrete_loss(
+			batch, predictions[1], batch.discrete_actions
+		)
+		loss = (continuous_loss + discrete_loss) * kwargs["curriculum_strength"]
+		# Perform the backpropagation
+		optimizer.zero_grad()
+		loss.backward()
+		optimizer.step()
+		return loss.detach().cpu().numpy().item()
 
 	def _compute_continuous_loss(self, batch: BatchExperience, predictions, targets, gamma: float) -> torch.Tensor:
 		if torch.numel(batch.continuous_actions) == 0:
@@ -572,14 +647,16 @@ class SNNAgent(torch.nn.Module):
 		"""
 		Copies the weights from the other network to this network with a factor of tau
 		"""
-		for param, other_param in zip(self.parameters(), other.parameters()):
-			param.data.copy_((1 - tau) * param.data + tau * other_param.data)
+		with torch.no_grad():
+			for param, other_param in zip(self.parameters(), other.parameters()):
+				param.data.copy_((1 - tau) * param.data + tau * other_param.data)
 	
 	def hard_update(self, other: 'SNNAgent') -> None:
 		"""
 		Copies the weights from the other network to this network
 		"""
-		self.load_state_dict(other.state_dict())
+		with torch.no_grad():
+			self.load_state_dict(other.state_dict())
 
 	@staticmethod
 	def exec_terminal_steps_(
@@ -677,6 +754,7 @@ class SNNAgent(torch.nn.Module):
 				for agent_index, agent_id in enumerate(decision_steps.agent_id):
 					agent_maps.last_action[agent_id] = actions_list[agent_index]
 				env.set_actions(behavior_name, actions)
+			p_bar.set_postfix(cumulative_reward=f"{np.mean(cumulative_rewards) if cumulative_rewards else 0.0:.3f}")
 			p_bar.update(min(buffer.counter - last_buffer_counter, n_trajectories - last_buffer_counter))
 			last_buffer_counter = buffer.counter
 			env.step()
