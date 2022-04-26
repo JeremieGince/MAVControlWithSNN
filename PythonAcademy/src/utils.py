@@ -2,13 +2,14 @@ import collections.abc
 import os
 import random
 from collections import defaultdict
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 # from PythonAcademy.models.dqn import DQN, dqn_loss
+from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 
 
 def set_random_seed(environment, seed):
@@ -198,5 +199,10 @@ def to_tensor(x, dtype=torch.float32):
 
 def linear_decay(init_value, min_value, decay_value, current_itr):
 	return max(init_value * decay_value ** current_itr, min_value)
+
+
+def send_parameter_to_channel(channel: EnvironmentParametersChannel, parameters: Dict[str, Any]):
+	for key, value in parameters.items():
+		channel.set_float_parameter(key, float(value))
 
 
