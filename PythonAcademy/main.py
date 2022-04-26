@@ -10,7 +10,22 @@ from torchvision.transforms import Compose, Lambda
 from PythonAcademy.src.curriculum import CompletionCriteria, Curriculum, Lesson
 from PythonAcademy.src.heuristics import FgHeuristic, RandomHeuristic
 from PythonAcademy.src.snn_agent import LoadCheckpointMode, SNNAgent
-from PythonAcademy.src.utils import to_tensor
+from PythonAcademy.src.utils import send_parameter_to_channel, to_tensor
+
+
+def get_env_parameters(int_time: int):
+	return dict(
+		batchSize=4,
+		camFollowTargetAgent=False,
+		droneMaxStartY=2.5,
+		observationStacks=int_time,
+		observationWidth=28,
+		observationHeight=28,
+		enableNeuromorphicCamera=True,
+		divergenceAsOneHot=True,
+		enableDivergence=False,
+		usePositionAsInput=False,
+	)
 
 
 def create_curriculum(channel, teacher=None):
@@ -38,16 +53,7 @@ def setup_environment(integration_time):
 		no_graphics=True
 	)
 	engine_config_channel.set_configuration(EngineConfig.default_config())
-	params_channel.set_float_parameter("batchSize", 4)
-	params_channel.set_float_parameter("camFollowTargetAgent", False)
-	params_channel.set_float_parameter("droneMaxStartY", 2.5)
-	params_channel.set_float_parameter("observationStacks", integration_time)
-	params_channel.set_float_parameter("observationWidth", 28)
-	params_channel.set_float_parameter("observationHeight", 28)
-	params_channel.set_float_parameter("enableNeuromorphicCamera", False)
-	params_channel.set_float_parameter("divergenceAsOneHot", True)
-	params_channel.set_float_parameter("enableDivergence", True)
-	params_channel.set_float_parameter("usePositionAsInput", False)
+	send_parameter_to_channel(params_channel, get_env_parameters(integration_time))
 	time.sleep(0.5)
 	env.reset()
 	time.sleep(0.5)
@@ -63,8 +69,8 @@ def train_agent(env, integration_time, channels):
 		input_transform=[
 			Compose([
 				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
-				# Lambda(lambda t: torch.permute(t, (2, 0, 1))),
-				# Lambda(lambda t: torch.flatten(t, start_dim=1))
+				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
+				Lambda(lambda t: torch.flatten(t, start_dim=1))
 			]),
 			Compose([
 				Lambda(lambda a: torch.from_numpy(a)),
