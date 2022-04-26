@@ -393,6 +393,14 @@ class SNNAgent(torch.nn.Module):
 			)
 		return actions_list
 
+	def _init_target_network(self) -> 'SNNAgent':
+		target_network = deepcopy(self)
+		target_network.eval()
+		for param in target_network.parameters():
+			param.requires_grad = False
+		target_network.train()
+		return target_network
+
 	@staticmethod
 	def _set_default_fit_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
 		kwargs.setdefault("close_env", True)
@@ -451,7 +459,7 @@ class SNNAgent(torch.nn.Module):
 				if verbose:
 					warnings.warn("No such checkpoint. Fit from beginning.")
 
-		target_network = deepcopy(self)
+		target_network = self._init_target_network()
 		best_rewards = self.training_history.max("Rewards")
 		env.reset()
 		buffer, _ = self.generate_trajectories(
