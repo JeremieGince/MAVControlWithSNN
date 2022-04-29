@@ -90,10 +90,12 @@ public class FollowCamera : MonoBehaviour
     public bool AllEnvironmentsInView() {
         List<EnvironmentScript> envScripts = environmentManager.GetEnvironments();
         for (int i = 0; i < envScripts.Count; i++) {
-            Vector3 viewPos = m_camera.WorldToViewportPoint(envScripts[i].transform.position);
-            bool inView = viewPos.x >= 0 && viewPos.x <= 1 && viewPos.y >= 0 && viewPos.y <= 1 && viewPos.z > 0;
-            if (!inView) {
-                return false;
+            foreach(Vector3 pos in envScripts[i].GetFloorExtBounds()) {
+                Vector3 viewPos = m_camera.WorldToViewportPoint(pos);
+                bool inView = viewPos.x >= 0 && viewPos.x <= 1 && viewPos.y >= 0 && viewPos.y <= 1 && viewPos.z > 0;
+                if (!inView) {
+                    return false;
+                }
             }
         }
         return true;
