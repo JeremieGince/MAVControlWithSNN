@@ -27,14 +27,22 @@ public class AgentLanding : Agent
     [SerializeField] private bool enableDisplacement = true;
     [SerializeField] private bool enableDivergence = true;
     [SerializeField] private bool enableNeuromorphicCamera = true;
+    [SerializeField] private bool enableCamera = true;
     [SerializeField] private float divergenceSetPoint = 1f;
     [SerializeField] private float droneMinStartY = 1f;
     [SerializeField] private float droneMaxStartY = 100f;
     [SerializeField] private bool usePositionAsInput = true;
+    [SerializeField] private bool useRotationAsInput = true;
+    [SerializeField] private bool useVelocityAsInput = true;
+    [SerializeField] private bool useAngularVelocityAsInput = true;
     [SerializeField] private float propelersConstForce = 0f;
     [SerializeField] private bool useForceRatio = true;
     [SerializeField] private float properlersForce;
+    [SerializeField] private float droneDrag = 1f;
+    [SerializeField] private float droneAngularDrag = 5f;
     [SerializeField] private float targetLandingVelocity = 1f;
+    [SerializeField] private float targetLandingAngularVelocity = 5f;
+    [SerializeField] private float targetLandingAngleMagnitude = 15f;
 
     [Header("Processing Parameters")]
     [SerializeField] private bool divergenceAsOneHot = true;
@@ -56,6 +64,7 @@ public class AgentLanding : Agent
     [SerializeField] private MeshRenderer floorMeshRenderer;
 
     [Header("Drone references")]
+    [SerializeField] private CameraSensorComponent cameraSensor;
     [SerializeField] private DivergenceCamera divergenceCamera;
     [SerializeField] private NeuromorphicCamera neuromorphicCamera;
     private Rigidbody droneRigidbody;
@@ -71,10 +80,13 @@ public class AgentLanding : Agent
     
 
     private void Awake() {
-        UpdateBehaviorParameters();
         droneRigidbody = GetComponent<Rigidbody>();
         properlersForce = 2f * 9.81f * droneRigidbody.mass;
         droneSize = droneRigidbody.GetComponentInChildren<Renderer>().bounds.size;
+
+        InitializeEnvironmentParameters();
+        InitializeDroneState();
+        UpdateBehaviorParameters();
     }
 
     private void Start() {
@@ -84,6 +96,10 @@ public class AgentLanding : Agent
         droneRigidbody.angularVelocity = Vector3.zero;
         //droneRigidbody.AddForce(droneRigidbody.mass * 9.8f * droneRigidbody.transform.up);
         environmentScript = GetComponentInParent<EnvironmentScript>();
+
+        InitializeEnvironmentParameters();
+        InitializeDroneState();
+        UpdateBehaviorParameters();
     }
 
 
@@ -99,11 +115,13 @@ public class AgentLanding : Agent
 
         int spaceSize = 0;
         spaceSize += enableDisplacement ? 3 : 0;
-        spaceSize += enableTorque ? 3 : 0;
+        spaceSize += usePositionAsInput ? 3 : 0;
+        spaceSize += useRotationAsInput ? 3 : 0;
+        spaceSize += useVelocityAsInput ? 3 : 0;
+        spaceSize += useAngularVelocityAsInput ? 3 : 0;
         if (enableDivergence) {
             spaceSize += divergenceAsOneHot ? divergenceBins : 1;
         }
-        spaceSize += usePositionAsInput ? 3 : 0;
         behaviorParameters.BrainParameters.VectorObservationSize = spaceSize;
         behaviorParameters.BrainParameters.NumStackedVectorObservations = 1;
     }
@@ -145,14 +163,22 @@ public class AgentLanding : Agent
         enableDisplacement = AsBool(environmentParameters.GetWithDefault("enableDisplacement", System.Convert.ToSingle(enableDisplacement)));
         enableDivergence = AsBool(environmentParameters.GetWithDefault("enableDivergence", System.Convert.ToSingle(enableDivergence)));
         enableNeuromorphicCamera = AsBool(environmentParameters.GetWithDefault("enableNeuromorphicCamera", System.Convert.ToSingle(enableNeuromorphicCamera)));
+        enableCamera = AsBool(environmentParameters.GetWithDefault("enableCamera", System.Convert.ToSingle(enableCamera)));
         divergenceSetPoint = environmentParameters.GetWithDefault("divergenceSetPoint", divergenceSetPoint);
         droneMinStartY = environmentParameters.GetWithDefault("droneMinStartY", droneMinStartY);
         droneMaxStartY = environmentParameters.GetWithDefault("droneMaxStartY", droneMaxStartY);
         usePositionAsInput = AsBool(environmentParameters.GetWithDefault("usePositionAsInput", System.Convert.ToSingle(usePositionAsInput)));
+        useRotationAsInput = AsBool(environmentParameters.GetWithDefault("useRotationAsInput", System.Convert.ToSingle(useRotationAsInput)));
+        useVelocityAsInput = AsBool(environmentParameters.GetWithDefault("useVelocityAsInput", System.Convert.ToSingle(useVelocityAsInput)));
+        useAngularVelocityAsInput = AsBool(environmentParameters.GetWithDefault("useAngularVelocityAsInput", System.Convert.ToSingle(useAngularVelocityAsInput)));
         propelersConstForce = environmentParameters.GetWithDefault("propelersConstForce", propelersConstForce);
         useForceRatio = AsBool(environmentParameters.GetWithDefault("useForceRatio", System.Convert.ToSingle(useForceRatio)));
         properlersForce = environmentParameters.GetWithDefault("properlersForce", properlersForce);
+        droneDrag = environmentParameters.GetWithDefault("droneDrag", droneDrag);
+        droneAngularDrag = environmentParameters.GetWithDefault("droneAngularDrag", droneAngularDrag);
         targetLandingVelocity = environmentParameters.GetWithDefault("targetLandingVelocity", targetLandingVelocity);
+        targetLandingAngularVelocity = environmentParameters.GetWithDefault("targetLandingAngularVelocity", targetLandingAngularVelocity);
+        targetLandingAngleMagnitude = environmentParameters.GetWithDefault("targetLandingAngleMagnitude", targetLandingAngleMagnitude);
 
 
         // Processing parameters
@@ -162,18 +188,28 @@ public class AgentLanding : Agent
     }
 
 
+    private void UpdateCameraSensorParameters() {
+        cameraSensor.gameObject.SetActive(enableCamera);
+        cameraSensor.ObservationStacks = (int)environmentParameters.GetWithDefault("observationStacks", (float)cameraSensor.ObservationStacks);
+        cameraSensor.Width = (int)environmentParameters.GetWithDefault("observationWidth", (float)cameraSensor.Width);
+        cameraSensor.Height = (int)environmentParameters.GetWithDefault("observationHeight", (float)cameraSensor.Height);
+    }
+
     private void InitializeDroneState() {
         droneRigidbody.velocity = Vector3.zero;
         droneRigidbody.angularVelocity = Vector3.zero;
         transform.localPosition = new Vector3(0, Random.Range(droneMinStartY, droneMaxStartY), 0);
         transform.localRotation = Quaternion.Euler(0, 0, 0);
-        //targetTransform.localPosition = new Vector3(Random.Range(-1.4f, 4f), 0, Random.Range(-3f, 3f));
+
+        droneRigidbody.angularDrag = droneAngularDrag;
+        droneRigidbody.drag = droneDrag;
 
         InitializePropelers();
         startPosition = transform.localPosition;
 
         divergenceCamera.gameObject.SetActive(enableDivergence);
         neuromorphicCamera.gameObject.SetActive(enableNeuromorphicCamera);
+        UpdateCameraSensorParameters();
     }
 
     public override void OnEpisodeBegin() {
@@ -183,6 +219,8 @@ public class AgentLanding : Agent
         ceilling.localPosition = new Vector3(0f, startPosition.y + 2f*(droneSize.y + 1f), 0f);
         environmentScript?.Randomize();
         //Debug.Log("Episode Begin");
+
+        //Debug.Log("NumContinuousActions: " + behaviorParameters.BrainParameters.ActionSpec.NumContinuousActions);
     }
 
 
@@ -193,13 +231,20 @@ public class AgentLanding : Agent
         if (enableDisplacement) {
             sensor.AddObservation(targetTransform.localPosition - transform.localPosition);
         }
-        if (enableTorque) {
-            sensor.AddObservation(transform.localRotation.eulerAngles);
+        if (useRotationAsInput) {
+            sensor.AddObservation(transform.localRotation.eulerAngles / 360f);
+        }
+        if (useVelocityAsInput) {
+            sensor.AddObservation(droneRigidbody.velocity);
+        }
+        if (useAngularVelocityAsInput) {
+            sensor.AddObservation(droneRigidbody.angularVelocity);
         }
 
         if (enableDivergence) {
             if (divergenceAsOneHot) {
-                sensor.AddOneHotObservation(GetDivergenceBinIndex(divergenceCamera.GetDivergence()), divergenceBins);
+                float div = divergenceCamera.GetDivergence();
+                sensor.AddOneHotObservation(GetDivergenceBinIndex(div), divergenceBins);
             }
             else {
                 sensor.AddObservation(divergenceCamera.GetDivergence());
@@ -211,7 +256,7 @@ public class AgentLanding : Agent
     public override void OnActionReceived(ActionBuffers actions) {
         float[] forces;
         if (enableTorque) {
-            forces = new float[] { actions.ContinuousActions[0], actions.ContinuousActions[1], actions.ContinuousActions[2], actions.ContinuousActions[4] };
+            forces = new float[] { actions.ContinuousActions[0], actions.ContinuousActions[1], actions.ContinuousActions[2], actions.ContinuousActions[3] };
         }
         else {
             forces = new float[] { actions.ContinuousActions[0] / 4f, actions.ContinuousActions[0] / 4f, actions.ContinuousActions[0] / 4f, actions.ContinuousActions[0] / 4f };
@@ -253,10 +298,10 @@ public class AgentLanding : Agent
                 continuousActions[0] = outputValue;
                 break;
             case 4:
-                continuousActions[0] = outputValue; // Input.GetKey(KeyCode.Q) ? 10f : 0f;
-                continuousActions[1] = outputValue; // Input.GetKey(KeyCode.W) ? 10f : 0f;
-                continuousActions[2] = outputValue; // Input.GetKey(KeyCode.N) ? 10f : 0f;
-                continuousActions[3] = outputValue; // Input.GetKey(KeyCode.M) ? 10f : 0f;
+                continuousActions[0] = outputValue / 4f; // Input.GetKey(KeyCode.Q) ? 10f : 0f;
+                continuousActions[1] = outputValue / 4f; // Input.GetKey(KeyCode.W) ? 10f : 0f;
+                continuousActions[2] = outputValue / 4f; // Input.GetKey(KeyCode.N) ? 10f : 0f;
+                continuousActions[3] = outputValue / 4f; // Input.GetKey(KeyCode.M) ? 10f : 0f;
                 break;
             default:
                 break;
@@ -306,8 +351,10 @@ public class AgentLanding : Agent
     private void OnContactEnter(Collider other, Collision collision = null) {
         WinState winState = CheckReachGoal(other);
         float relativeVelocity = collision == null ? Mathf.Abs(droneRigidbody.velocity.magnitude) : Mathf.Abs(collision.relativeVelocity.magnitude);
+        float angularVelocity = Mathf.Abs(droneRigidbody.angularVelocity.magnitude);
+        float angleMagnitude = Mathf.Abs(droneRigidbody.transform.rotation.eulerAngles.magnitude);
 
-        if (relativeVelocity > targetLandingVelocity) {
+        if (relativeVelocity > targetLandingVelocity || angularVelocity > targetLandingAngularVelocity || angleMagnitude > targetLandingAngleMagnitude) {
             if (enableDisplacement) {
                 switch (winState) {
                     case WinState.Win:
