@@ -93,6 +93,7 @@ MonoBehaviour:
   - {fileID: 2100000, guid: 0724a0ee7c9061e40a0a89b13de914c9, type: 2}
   ceilling: {fileID: 3266520297222254082}
   groundRenderer: {fileID: 3343820024291548960}
+  floorMeshRenderer: {fileID: 6109155460984179853}
   markersRoot: {fileID: 2758643503930700519}
   markerPrefabs:
   - {fileID: 826455451255828309, guid: b50af77f615cff446ab7534cb4039cee, type: 3}
@@ -469,73 +470,25 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 4899716743291363028, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: m_IsActive
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 5084217423962448781, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: m_IsActive
-      value: 0
-      objectReference: {fileID: 0}
     - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: ceilling
       value: 
       objectReference: {fileID: 8956602434933886687}
     - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: droneMaxStartY
-      value: 10
-      objectReference: {fileID: 0}
-    - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: targetTransform
       value: 
       objectReference: {fileID: 6109155461816081806}
     - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: enableDivergence
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
       propertyPath: floorMeshRenderer
       value: 
       objectReference: {fileID: 6109155460984179853}
-    - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: neuromorphicCamera
-      value: 
-      objectReference: {fileID: 2043969942779586426}
-    - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: usePositionAsInput
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 5807913176222183090, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: enableNeuromorphicCamera
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 6187081454207548743, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: threshold
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 8939348211681031626, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-      propertyPath: m_IsTrigger
-      value: 0
-      objectReference: {fileID: 0}
-    m_RemovedComponents:
-    - {fileID: 5863086281976619668, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
+    m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
 --- !u!4 &7497171312260976636 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 2416748058576541121, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
   m_PrefabInstance: {fileID: 5296600502564379197}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &2043969942779586426 stripped
-MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 6187081454207548743, guid: 4178d5a0c360ddc4aa1af4cfbc0a41d0, type: 3}
-  m_PrefabInstance: {fileID: 5296600502564379197}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2624246308d730142b17e0027e2ae0c7, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1001 &6109155461067242901
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -843,7 +796,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3397932765557568541, guid: 616b8dc0f910f1343a82e4f198d9c708, type: 3}
       propertyPath: m_Name
-      value: Ground
+      value: Floor
       objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 616b8dc0f910f1343a82e4f198d9c708, type: 3}
