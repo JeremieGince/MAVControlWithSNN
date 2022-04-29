@@ -17,6 +17,7 @@ public class EnvironmentScript : MonoBehaviour
     [Header("References")]
     public GameObject ceilling;
     [SerializeField] private MeshRenderer groundRenderer;
+    [SerializeField] private MeshRenderer floorMeshRenderer;
     [SerializeField] private GameObject markersRoot;
     public GameObject[] markerPrefabs;
     private List<GameObject> markers = new List<GameObject>();
@@ -35,6 +36,10 @@ public class EnvironmentScript : MonoBehaviour
     void Update()
     {
         
+    }
+
+    public Vector3[] GetFloorExtBounds() {
+        return new Vector3[]{ floorMeshRenderer.bounds.min, floorMeshRenderer.bounds.max };
     }
 
 
