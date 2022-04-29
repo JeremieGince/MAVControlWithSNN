@@ -14,8 +14,8 @@ public class EnvironmentManager : MonoBehaviour
     private EnvironmentParameters environmentParameters;
     [SerializeField] private GameObject environmentPrefab;
     private Vector3 envPrefabSize;
-    [SerializeField] private int batchSize = 32;
-    [SerializeField] private float padSize = 1f;
+    [SerializeField] private int n_agents = 1;
+    [SerializeField] private float padSize = 5f;
     private List<EnvironmentScript> environments;
 
     // Start is called before the first frame update
@@ -38,20 +38,21 @@ public class EnvironmentManager : MonoBehaviour
 
     private void InitializeReferences() {
         environmentParameters = Academy.Instance.EnvironmentParameters;
-        batchSize = (int)environmentParameters.GetWithDefault("batchSize", (float)batchSize);  // batchSize is the number of env or agents
+        n_agents = (int)environmentParameters.GetWithDefault("n_agents", (float)n_agents);
         envPrefabSize = environmentPrefab.GetComponentInChildren<Renderer>().bounds.size;
     }
 
 
 
     public void InstantiateEnvironments() {
-        int side0 = (int)Mathf.Ceil(Mathf.Sqrt((float)batchSize));
-        int side1 = batchSize / side0;
-
         InitializeReferences();
+
+        int side0 = (int)Mathf.Ceil(Mathf.Sqrt((float)n_agents));
+        int side1 = n_agents / side0;
+
         environments = new List<EnvironmentScript>((EnvironmentScript[])GameObject.FindObjectsOfType(typeof(EnvironmentScript)));
-        if(environments.Count > batchSize) {
-            for (int i = environments.Count-1; i >= batchSize-1; i--) {
+        if(environments.Count > n_agents) {
+            for (int i = environments.Count-1; i >= n_agents-1; i--) {
                 DestroyImmediate(environments[i].gameObject);
             }
         }
@@ -61,7 +62,7 @@ public class EnvironmentManager : MonoBehaviour
             float z = -(i / side0) * (envPrefabSize.x + padSize);
             environments[i].transform.position = new Vector3(x, 0f, z);
         }
-        for (int i = environments.Count; i < batchSize; i++) {
+        for (int i = environments.Count; i < n_agents; i++) {
             float x = -(i % side0) * (envPrefabSize.x + padSize);
             float z = -(i / side0) * (envPrefabSize.x + padSize);
             GameObject env = Instantiate(environmentPrefab, new Vector3(x, 0f, z), Quaternion.identity);
