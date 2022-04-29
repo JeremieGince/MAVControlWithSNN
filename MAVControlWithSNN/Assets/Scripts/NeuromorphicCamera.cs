@@ -245,7 +245,7 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
     [SerializeField] private int width = 84;
     [SerializeField] private int height = 84;
     [SerializeField] private int threshold = 1;
-    [Range(1, 1000)][SerializeField] private int observationStacks = 100;
+    [Range(1, 1000)][SerializeField] private int observationStacks = 10;
 
 
     private void Reset() {
@@ -316,6 +316,10 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
             sensor.Dispose();
             sensor = null;
         }
+    }
+
+    void OnDisabled() {
+        Dispose();
     }
 
 }
