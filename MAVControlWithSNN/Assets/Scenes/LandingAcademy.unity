@@ -398,6 +398,18 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 7497171312260976636, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 7497171312260976636, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7497171312260976636, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
 --- !u!1 &366743823
@@ -430,7 +442,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   environmentPrefab: {fileID: 6109155462070726394, guid: 5e1a63527d6b94e4e8c2d49221fd3c20, type: 3}
-  batchSize: 4
+  n_agents: 1
   padSize: 5
 --- !u!4 &366743825
 Transform:
