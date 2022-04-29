@@ -92,4 +92,4 @@ MonoBehaviour:
   width: 84
   height: 84
   threshold: 10
-  observationStacks: 100
+  observationStacks: 10
