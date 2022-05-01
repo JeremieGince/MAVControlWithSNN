@@ -14,15 +14,8 @@ from PythonAcademy.src.heuristics import FgHeuristic
 from PythonAcademy.src.mlp_agent import MLPAgent
 from PythonAcademy.src.rl_academy import LoadCheckpointMode, RLAcademy
 from PythonAcademy.src.snn_agent import SNNAgent
+from PythonAcademy.src.spiking_layers import ALIFLayer, LIFLayer
 from PythonAcademy.src.utils import send_parameter_to_channel, threshold_image, to_tensor
-
-
-def buff_trajectories(env: UnityEnvironment, n_trajectories: int = 1):
-	env.reset()
-	for _ in range(n_trajectories):
-		while not env.get_steps(list(env.behavior_specs)[0])[1]:
-			env.step()
-	env.reset()
 
 
 def get_env_parameters(int_time: int):
@@ -33,16 +26,19 @@ def get_env_parameters(int_time: int):
 		observationStacks=int_time,
 		observationWidth=28,
 		observationHeight=28,
-		enableNeuromorphicCamera=True,
+		enableNeuromorphicCamera=False,
 		enableCamera=False,
-		divergenceAsOneHot=True,
-		enableDivergence=False,
 		usePositionAsInput=False,
 		enableTorque=False,
 		enableDisplacement=False,
 		useRotationAsInput=False,
 		useVelocityAsInput=False,
 		useAngularVelocityAsInput=False,
+		useDivergenceAsInput=True,
+		divergenceAsOneHot=True,
+		divergenceBins=20,
+		divergenceBinSize=1.0,
+		maxDivergencePoints=100,
 		droneDrag=5.0,
 		droneAngularDrag=7.0,
 	)
@@ -55,6 +51,14 @@ def get_input_transforms(parameters: Dict[str, Any]):
 			Compose([
 				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
 				threshold_image,
+				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
+				Lambda(lambda t: torch.flatten(t, start_dim=1))
+			])
+		)
+	if np.isclose(float(parameters.get("useDivergenceAsInput", False)), 1.0):
+		input_transform.append(
+			Compose([
+				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
 				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
 				Lambda(lambda t: torch.flatten(t, start_dim=1))
 			])
@@ -114,9 +118,13 @@ def train_agent(env, integration_time, channels, env_params):
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
 		behavior_name=list(env.behavior_specs)[0].split("?")[0],
 		n_hidden_neurons=128,
+		# n_hidden_neurons=[10, 5],
 		int_time_steps=integration_time,
 		input_transform=get_input_transforms(env_params),
-		use_recurrent_connection=True,
+		use_recurrent_connection=False,
+		# hidden_layer_type=ALIFLayer,
+		hidden_layer_type=LIFLayer,
+		# name="snn",
 	)
 	print(f"Training agent {snn.name} on the behavior {snn.behavior_name}.")
 	print("\t behavior_spec: ", snn.spec)
@@ -130,14 +138,18 @@ def train_agent(env, integration_time, channels, env_params):
 			channels["params_channel"],
 			# teacher=h,
 		),
-		checkpoint_folder="checkpoints_snn128rec_Input_eventCam-prioritybuffer",
-		init_epsilon=0.1,
+		checkpoint_folder="checkpoints-lif128-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-alif128-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-alif10_5-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-lif10_5-Input_divH-pbuffer",
 	)
 	hist = academy.train(
-		n_iterations=int(1e4),
+		n_iterations=int(3e3),
 		load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
 		# force_overwrite=True,
 		save_freq=100,
+		use_priority_buffer=True,
+		max_seconds=3 * 60 * 60,
 	)
 	# hist.plot(show=True, figsize=(10, 6))
 
