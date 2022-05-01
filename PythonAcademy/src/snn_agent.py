@@ -34,7 +34,7 @@ class SNNAgent(BaseAgent):
 			spike_func: Union[Type[SpikeFunction], SpikeFuncType] = HeavisideSigmoidApprox,
 			hidden_layer_type: Union[Type[LIFLayer], LayerType] = ALIFLayer,
 			checkpoint_folder: str = "checkpoints",
-			name: str = "snn",
+			name: Optional[str] = None,
 			device: torch.device = None,
 			input_transform: Union[Dict[str, Callable], List[Callable]] = None,
 			**kwargs
@@ -55,6 +55,8 @@ class SNNAgent(BaseAgent):
 		:param input_transform: The transform to apply to the observations.
 		:param kwargs: The other arguments.
 		"""
+		if name is None:
+			name = f"{hidden_layer_type.__name__}_snn"
 		super(SNNAgent, self).__init__(
 			spec=spec,
 			behavior_name=behavior_name,
