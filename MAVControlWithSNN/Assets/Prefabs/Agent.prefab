@@ -180,14 +180,14 @@ MonoBehaviour:
   agentParameters:
     maxStep: 0
   hasUpgradedFromAgentParameters: 1
-  MaxStep: 0
+  MaxStep: 100000
   stepRewardFactor: 0
   reachGoalReward: 1
   hitWallReward: -1
   behaviorName: Landing
   enableTorque: 1
   enableDisplacement: 0
-  enableDivergence: 1
+  useDivergenceAsInput: 1
   enableNeuromorphicCamera: 1
   enableCamera: 1
   divergenceSetPoint: 1
@@ -195,6 +195,8 @@ MonoBehaviour:
   droneMaxStartY: 2.5
   usePositionAsInput: 1
   useRotationAsInput: 1
+  useVelocityAsInput: 1
+  useAngularVelocityAsInput: 1
   propelersConstForce: 0
   useForceRatio: 1
   properlersForce: 20
