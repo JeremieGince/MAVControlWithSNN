@@ -115,8 +115,10 @@ def train_agent(env, integration_time, channels, env_params):
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
 		behavior_name=list(env.behavior_specs)[0].split("?")[0],
 		input_transform=get_input_transforms(env_params),
-		n_hidden_neurons=[128, 128],
+		# n_hidden_neurons=[128, 128],
+		n_hidden_neurons=[10, 5],
 	)
+	print(f"Training device: {mlp.device}")
 	print(f"Training agent {mlp.name} on the behavior {mlp.behavior_name}.")
 	print("\t behavior_spec: ", mlp.spec)
 	print("\t input_sizes: ", mlp.input_sizes)
@@ -126,7 +128,8 @@ def train_agent(env, integration_time, channels, env_params):
 		curriculum=create_curriculum(
 			channels["params_channel"],
 		),
-		checkpoint_folder="checkpoints-mlp128x128-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-mlp128x128-Input_divH-pbuffer",
+		checkpoint_folder="checkpoints-mlp10x5-Input_divH-pbuffer",
 	)
 	hist = academy.train(
 		n_iterations=int(1e3),
