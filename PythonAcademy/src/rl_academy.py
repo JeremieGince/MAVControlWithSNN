@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import warnings
 from collections import defaultdict, deque
 from copy import deepcopy
@@ -349,6 +350,7 @@ class RLAcademy:
 			load_checkpoint_mode: LoadCheckpointMode = None,
 			force_overwrite: bool = False,
 			save_freq: int = int(1e2),
+			max_seconds: float = np.inf,
 			**kwargs
 	) -> Union[TrainingHistory, TrainingHistoriesMap]:
 		"""
@@ -357,6 +359,7 @@ class RLAcademy:
 		:param load_checkpoint_mode: The mode to use when loading a checkpoint.
 		:param force_overwrite: True to overwrite the checkpoint if it already exists.
 		:param save_freq: The frequency with which to save the checkpoint.
+		:param max_seconds: The maximum number of seconds to train for.
 		:param kwargs: The fit kwargs.
 		:return: The training history.
 		"""
@@ -364,6 +367,7 @@ class RLAcademy:
 		self.kwargs.update(kwargs)
 		self._update_optimizer_()
 
+		start_time = time.time()
 		start_itr = self._check_and_load_state_from_academy_checkpoint(load_checkpoint_mode, force_overwrite)
 		best_rewards = self.training_histories.max("Rewards")
 		best_saved_rewards = best_rewards
@@ -401,6 +405,9 @@ class RLAcademy:
 					best_rewards = -np.inf
 					self._update_bc_optimizer_()
 			p_bar.set_postfix(p_bar_postfix)
+			if time.time() - start_time > max_seconds:
+				warnings.warn(f"Training stopped after {max_seconds} seconds.")
+				break_flag = True
 			if i % save_freq == 0 or break_flag or i == n_iterations - 1:
 				best_saved_rewards = self._make_itr_checkpoint(i, itr_metrics, best_saved_rewards)
 			if break_flag:
