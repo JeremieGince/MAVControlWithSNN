@@ -17,7 +17,7 @@ from PythonAcademy.src.utils import send_parameter_to_channel, threshold_image, 
 
 def get_env_parameters(int_time: int):
 	return dict(
-		n_agents=16,
+		n_agents=8,
 		camFollowTargetAgent=False,
 		droneMaxStartY=2.5,
 		observationStacks=int_time,
@@ -25,14 +25,17 @@ def get_env_parameters(int_time: int):
 		observationHeight=28,
 		enableNeuromorphicCamera=False,
 		enableCamera=False,
-		divergenceAsOneHot=True,
-		enableDivergence=True,
 		usePositionAsInput=False,
 		enableTorque=False,
 		enableDisplacement=False,
 		useRotationAsInput=False,
 		useVelocityAsInput=False,
 		useAngularVelocityAsInput=False,
+		useDivergenceAsInput=True,
+		divergenceAsOneHot=True,
+		divergenceBins=20,
+		divergenceBinSize=1.0,
+		maxDivergencePoints=100,
 		droneDrag=5.0,
 		droneAngularDrag=7.0,
 	)
@@ -123,15 +126,15 @@ def train_agent(env, integration_time, channels, env_params):
 		curriculum=create_curriculum(
 			channels["params_channel"],
 		),
-		checkpoint_folder="checkpoints_mlp128x128-Input_div",
-		init_epsilon=0.1,
+		checkpoint_folder="checkpoints-mlp128x128-Input_divH-pbuffer",
 	)
 	hist = academy.train(
 		n_iterations=int(1e3),
-		load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
-		# force_overwrite=True,
+		# load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
+		force_overwrite=True,
 		save_freq=100,
-		use_priority_buffer=False,
+		use_priority_buffer=True,
+		max_seconds=1*60*60,
 	)
 	# hist.plot(show=True, figsize=(10, 6))
 
