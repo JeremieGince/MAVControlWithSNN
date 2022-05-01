@@ -265,7 +265,8 @@ class SNNAgent(BaseAgent):
 
 	def get_logits(self, obs: Sequence[Union[np.ndarray, torch.Tensor]]) -> torch.Tensor:
 		output_records, hidden_states = self(obs)
-		return output_records[:, -1]
+		logits = torch.mean(output_records, dim=1)
+		return logits
 
 	def _obs_forward_to_logits(
 			self,
