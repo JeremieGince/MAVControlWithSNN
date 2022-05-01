@@ -54,10 +54,10 @@ if __name__ == '__main__':
 		camFollowTargetAgent=True,
 		droneMaxStartY=50.0,
 		observationStacks=1,
-		observationWidth=28,
-		observationHeight=28,
+		observationWidth=8,
+		observationHeight=8,
 		enableNeuromorphicCamera=True,
-		enableCamera=False,
+		enableCamera=True,
 		divergenceAsOneHot=True,
 		useDivergenceAsInput=True,
 		usePositionAsInput=True,
@@ -72,25 +72,27 @@ if __name__ == '__main__':
 	behavior_name = list(env.behavior_specs)[0]
 	spec: BehaviorSpec = env.behavior_specs[behavior_name]
 	obs_specs_names = [o_spec.name for o_spec in spec.observation_specs]
-	visual_obs_name = [o_name for o_name in obs_specs_names if 'camera' in o_name.lower()][0]
+	visual_obs_names = [o_name for o_name in obs_specs_names if 'camera' in o_name.lower()]
 	print(f"obs_specs_names: {obs_specs_names}")
-	print(f"Visual observation name: {visual_obs_name}")
+	print(f"Visual observation names: {visual_obs_names}")
 	obs_traces = {k: [] for k in obs_specs_names}
 	obs_shapes = {o_spec.name: o_spec.shape for o_spec in spec.observation_specs}
 	pprint.pprint(obs_shapes, indent=4)
-	n_steps = int(1e2)
+	window_size = (512, 512)
+	n_steps = int(1e3)
 	for i in tqdm(range(n_steps)):
 		decision_steps, terminal_steps = env.get_steps(list(env.behavior_specs)[0])
 		if len(decision_steps) > 0:
 			for obs_name, obs in zip(obs_specs_names, decision_steps[0].obs):
 				obs_traces[obs_name].append(obs)
-			visual = np.asarray(obs_traces[visual_obs_name][-1]).squeeze()
-			visual = threshold_image(visual)
-			obs_traces[visual_obs_name][-1] = visual
-			if env_params["observationStacks"] > 1:
-				cv2.imshow('obs', cv2.resize(visual[..., 0], (256, 256)))
-			else:
-				cv2.imshow('obs', cv2.resize(visual, (256, 256)))
+			for visual_obs_name in visual_obs_names:
+				visual = np.asarray(obs_traces[visual_obs_name][-1]).squeeze()
+				visual = threshold_image(visual)
+				obs_traces[visual_obs_name][-1] = visual
+				if env_params["observationStacks"] > 1:
+					cv2.imshow(visual_obs_name, cv2.resize(visual[..., 0], window_size))
+				else:
+					cv2.imshow(visual_obs_name, cv2.resize(visual, window_size))
 			env.set_actions(behavior_name, spec.action_spec.random_action(len(decision_steps)))
 		env.step()
 		key = cv2.waitKey(1)
