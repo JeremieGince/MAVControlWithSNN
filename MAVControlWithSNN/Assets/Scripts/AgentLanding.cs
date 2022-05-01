@@ -25,7 +25,7 @@ public class AgentLanding : Agent
     [SerializeField] private string behaviorName = "Landing";
     [SerializeField] private bool enableTorque = true;
     [SerializeField] private bool enableDisplacement = true;
-    [SerializeField] private bool enableDivergence = true;
+    [SerializeField] private bool useDivergenceAsInput = true;
     [SerializeField] private bool enableNeuromorphicCamera = true;
     [SerializeField] private bool enableCamera = true;
     [SerializeField] private float divergenceSetPoint = 1f;
@@ -119,9 +119,11 @@ public class AgentLanding : Agent
         spaceSize += useRotationAsInput ? 3 : 0;
         spaceSize += useVelocityAsInput ? 3 : 0;
         spaceSize += useAngularVelocityAsInput ? 3 : 0;
-        if (enableDivergence) {
+        /*
+        if (useDivergenceAsInput) {
             spaceSize += divergenceAsOneHot ? divergenceBins : 1;
         }
+        */
         behaviorParameters.BrainParameters.VectorObservationSize = spaceSize;
         behaviorParameters.BrainParameters.NumStackedVectorObservations = 1;
     }
@@ -161,7 +163,7 @@ public class AgentLanding : Agent
         // Environments parameters
         enableTorque = AsBool(environmentParameters.GetWithDefault("enableTorque", System.Convert.ToSingle(enableTorque)));
         enableDisplacement = AsBool(environmentParameters.GetWithDefault("enableDisplacement", System.Convert.ToSingle(enableDisplacement)));
-        enableDivergence = AsBool(environmentParameters.GetWithDefault("enableDivergence", System.Convert.ToSingle(enableDivergence)));
+        useDivergenceAsInput = AsBool(environmentParameters.GetWithDefault("useDivergenceAsInput", System.Convert.ToSingle(useDivergenceAsInput)));
         enableNeuromorphicCamera = AsBool(environmentParameters.GetWithDefault("enableNeuromorphicCamera", System.Convert.ToSingle(enableNeuromorphicCamera)));
         enableCamera = AsBool(environmentParameters.GetWithDefault("enableCamera", System.Convert.ToSingle(enableCamera)));
         divergenceSetPoint = environmentParameters.GetWithDefault("divergenceSetPoint", divergenceSetPoint);
@@ -182,9 +184,9 @@ public class AgentLanding : Agent
 
 
         // Processing parameters
-        divergenceAsOneHot = AsBool(environmentParameters.GetWithDefault("divergenceAsOneHot", System.Convert.ToSingle(divergenceAsOneHot)));
-        divergenceBins = (int)environmentParameters.GetWithDefault("divergenceBins", (float)divergenceBins);
-        divergenceBinSize = (int)environmentParameters.GetWithDefault("divergenceBinSize", (float)divergenceBinSize);
+        //divergenceAsOneHot = AsBool(environmentParameters.GetWithDefault("divergenceAsOneHot", System.Convert.ToSingle(divergenceAsOneHot)));
+        //divergenceBins = (int)environmentParameters.GetWithDefault("divergenceBins", (float)divergenceBins);
+        //divergenceBinSize = (int)environmentParameters.GetWithDefault("divergenceBinSize", (float)divergenceBinSize);
     }
 
 
@@ -207,7 +209,7 @@ public class AgentLanding : Agent
         InitializePropelers();
         startPosition = transform.localPosition;
 
-        divergenceCamera.gameObject.SetActive(enableDivergence);
+        divergenceCamera.gameObject.SetActive(useDivergenceAsInput);
         neuromorphicCamera.gameObject.SetActive(enableNeuromorphicCamera);
         UpdateCameraSensorParameters();
     }
@@ -241,6 +243,7 @@ public class AgentLanding : Agent
             sensor.AddObservation(droneRigidbody.angularVelocity);
         }
 
+        /*
         if (enableDivergence) {
             if (divergenceAsOneHot) {
                 float div = divergenceCamera.GetDivergence();
@@ -250,6 +253,7 @@ public class AgentLanding : Agent
                 sensor.AddObservation(divergenceCamera.GetDivergence());
             }
         }
+        */
 
     }
 

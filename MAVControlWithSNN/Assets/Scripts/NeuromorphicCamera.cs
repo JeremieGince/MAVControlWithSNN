@@ -107,12 +107,6 @@ public class NeuromorphicCameraSensor : ISensor, IDisposable {
     }
 
     byte[] ISensor.GetCompressedObservation() {
-        /*
-        byte[] matData = new byte[state.Height * state.Width];
-        cv2.Mat state_8U = new cv2.Mat(rows: height, cols: width, type: cv2.MatType.CV_8U);
-        state.ConvertTo(state_8U, cv2.MatType.CV_8U);
-        state_8U.GetArray(0, 0, matData);
-        */
         StateToTexture(m_State, m_StateTexture);
         return m_StateTexture.EncodeToPNG();
     }
@@ -236,7 +230,7 @@ public class NeuromorphicCamera : SensorComponent, IDisposable {
 
     private EnvironmentParameters environmentParameters;
 
-    [SerializeField] private Camera cameraInput;
+    private Camera cameraInput;
     private Texture2D m_TextureInput;
     private NeuromorphicCameraSensor sensor;
 
