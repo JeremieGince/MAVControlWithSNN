@@ -47,7 +47,7 @@ class CheckpointManager:
 		)
 		return f"{self.checkpoint_folder}/{full_filename}.json"
 
-	def _create_checkpoint_path(self, itr: int = -1):
+	def _create_checkpoint_filename(self, itr: int = -1):
 		pre_name = f"{self.meta_path_prefix}"
 		if itr == -1:
 			post_name = ""
@@ -56,10 +56,10 @@ class CheckpointManager:
 		return f"{pre_name}{post_name}{CheckpointManager.SAVE_EXT}"
 
 	def _create_new_checkpoint_meta(self, itr: int, best: bool = False) -> dict:
-		save_path = self._create_checkpoint_path(itr)
-		new_info = {CheckpointManager.CHECKPOINT_ITRS_KEY: {itr: save_path}}
+		save_name = self._create_checkpoint_filename(itr)
+		new_info = {CheckpointManager.CHECKPOINT_ITRS_KEY: {itr: save_name}}
 		if best:
-			new_info[CheckpointManager.CHECKPOINT_BEST_KEY] = save_path
+			new_info[CheckpointManager.CHECKPOINT_BEST_KEY] = save_name
 		return new_info
 
 	def save_checkpoint(
@@ -72,18 +72,18 @@ class CheckpointManager:
 			training_history: Optional[Any] = None,
 	):
 		os.makedirs(self.checkpoint_folder, exist_ok=True)
-		save_path = self._create_checkpoint_path(itr)
+		save_name = self._create_checkpoint_filename(itr)
 		torch.save({
 			CheckpointManager.CHECKPOINT_ITR_KEY: itr,
 			CheckpointManager.CHECKPOINT_STATE_DICT_KEY: state_dict,
 			CheckpointManager.CHECKPOINT_OPTIMIZER_STATE_DICT_KEY: optimizer_state_dict,
 			CheckpointManager.CHECKPOINT_METRICS_KEY: itr_metrics,
 			CheckpointManager.CHECKPOINT_TRAINING_HISTORY_KEY: training_history,
-		}, save_path)
+		}, os.path.join(self.checkpoint_folder, save_name))
 		self.save_checkpoints_meta(self._create_new_checkpoint_meta(itr, best))
 
 	@staticmethod
-	def get_save_path_from_checkpoints(
+	def get_save_name_from_checkpoints(
 			checkpoints_meta: Dict[str, Union[str, Dict[Any, str]]],
 			load_checkpoint_mode: LoadCheckpointMode = LoadCheckpointMode.BEST_ITR
 	) -> str:
@@ -102,8 +102,8 @@ class CheckpointManager:
 	) -> dict:
 		with open(self.checkpoints_meta_path, "r+") as jsonFile:
 			info: dict = json.load(jsonFile)
-		path = CheckpointManager.get_save_path_from_checkpoints(info, load_checkpoint_mode)
-		checkpoint = torch.load(f"{self.checkpoint_folder}/{path}")
+		filename = CheckpointManager.get_save_name_from_checkpoints(info, load_checkpoint_mode)
+		checkpoint = torch.load(f"{self.checkpoint_folder}/{filename}")
 		return checkpoint
 
 	def save_checkpoints_meta(self, new_info: dict):
