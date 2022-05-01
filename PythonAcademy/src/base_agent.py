@@ -56,7 +56,7 @@ class BaseAgent(torch.nn.Module):
 			checkpoints_meta_path = self.checkpoints_meta_path
 		with open(checkpoints_meta_path, "r+") as jsonFile:
 			info: dict = json.load(jsonFile)
-		path = CheckpointManager.get_save_path_from_checkpoints(info, load_checkpoint_mode)
+		path = CheckpointManager.get_save_name_from_checkpoints(info, load_checkpoint_mode)
 		checkpoint = torch.load(path)
 		self.load_state_dict(checkpoint[CheckpointManager.CHECKPOINT_STATE_DICT_KEY], strict=True)
 		return checkpoint
