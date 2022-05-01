@@ -1,3 +1,7 @@
+# Code taken from https://github.com/JeremieGince/SNNImageClassification
+# authors: Jeremie Gince, Remi Lamontagne-Caron
+
+
 import enum
 from typing import Tuple, Type
 
@@ -156,16 +160,12 @@ class LIFLayer(RNNLayer):
 	def forward(self, inputs: torch.Tensor, state: Tuple[torch.Tensor, ...] = None):
 		assert inputs.ndim == 2
 		batch_size, nb_features = inputs.shape
-		# state = self._init_forward_state(state, batch_size)
-		# next_state = self.create_empty_state(batch_size)
 		V, Z = self._init_forward_state(state, batch_size)
-		# next_V, next_Z = self.create_empty_state(batch_size)
 		input_current = torch.matmul(inputs, self.forward_weights)
 		if self.use_recurrent_connection:
 			rec_current = torch.matmul(Z, torch.mul(self.recurrent_weights, self.rec_mask))
 		else:
 			rec_current = 0.0
-		# next_V = self.alpha * V + input_current + rec_current - Z.detach() * self.threshold
 		next_V = (self.alpha * V + input_current + rec_current) * (1.0 - Z.detach())
 		next_Z = self.spike_func.apply(next_V, self.threshold, self.gamma)
 		return next_Z, (next_V, next_Z)
