@@ -26,7 +26,7 @@ def get_env_parameters(int_time: int):
 		observationStacks=int_time,
 		observationWidth=28,
 		observationHeight=28,
-		enableNeuromorphicCamera=False,
+		enableNeuromorphicCamera=True,
 		enableCamera=False,
 		usePositionAsInput=False,
 		enableTorque=False,
@@ -34,7 +34,7 @@ def get_env_parameters(int_time: int):
 		useRotationAsInput=False,
 		useVelocityAsInput=False,
 		useAngularVelocityAsInput=False,
-		useDivergenceAsInput=True,
+		useDivergenceAsInput=False,
 		divergenceAsOneHot=True,
 		divergenceBins=20,
 		divergenceBinSize=1.0,
@@ -117,15 +117,17 @@ def train_agent(env, integration_time, channels, env_params):
 	snn = SNNAgent(
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
 		behavior_name=list(env.behavior_specs)[0].split("?")[0],
-		n_hidden_neurons=128,
+		# n_hidden_neurons=128,
 		# n_hidden_neurons=[10, 5],
+		n_hidden_neurons=[64, 64],
 		int_time_steps=integration_time,
 		input_transform=get_input_transforms(env_params),
 		use_recurrent_connection=False,
-		# hidden_layer_type=ALIFLayer,
-		hidden_layer_type=LIFLayer,
+		hidden_layer_type=ALIFLayer,
+		# hidden_layer_type=LIFLayer,
 		# name="snn",
 	)
+	print(f"Training device: {snn.device}")
 	print(f"Training agent {snn.name} on the behavior {snn.behavior_name}.")
 	print("\t behavior_spec: ", snn.spec)
 	print("\t input_sizes: ", snn.input_sizes)
@@ -138,10 +140,11 @@ def train_agent(env, integration_time, channels, env_params):
 			channels["params_channel"],
 			# teacher=h,
 		),
-		checkpoint_folder="checkpoints-lif128-Input_divH-pbuffer",
+		# checkpoint_folder=f"checkpoints-lif128-Input_divH-pbuffer",
 		# checkpoint_folder="checkpoints-alif128-Input_divH-pbuffer",
-		# checkpoint_folder="checkpoints-alif10_5-Input_divH-pbuffer",
-		# checkpoint_folder="checkpoints-lif10_5-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-alif10x5-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-lif10x5-Input_divH-pbuffer",
+		checkpoint_folder="checkpoints-alif64x64-Input_eventCam-pbuffer",
 	)
 	hist = academy.train(
 		n_iterations=int(3e3),
@@ -149,7 +152,7 @@ def train_agent(env, integration_time, channels, env_params):
 		# force_overwrite=True,
 		save_freq=100,
 		use_priority_buffer=True,
-		max_seconds=3 * 60 * 60,
+		max_seconds=5 * 60 * 60,
 	)
 	# hist.plot(show=True, figsize=(10, 6))
 
