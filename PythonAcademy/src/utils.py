@@ -285,7 +285,7 @@ class TrainingHistoriesMap:
 									lesson.completion_criteria.threshold*np.ones(len(history[k])), 'k--',
 									label=f"{k} threshold", linewidth=kwargs['linewidth']
 								)
-							if history_name == TrainingHistoriesMap.REPORT_KEY:
+							if history_name == TrainingHistoriesMap.REPORT_KEY and lesson.is_completed:
 								ax.axvline(
 									lessons_start_itr[k][lesson_idx], ymin=np.min(history[k]), ymax=np.max(history[k]),
 									color='r', linestyle='--', linewidth=kwargs['linewidth'], label=f"lesson start"
