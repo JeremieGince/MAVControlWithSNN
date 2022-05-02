@@ -6,11 +6,9 @@ from mlagents_envs.base_env import ActionTuple, BaseEnv
 
 from tqdm.auto import tqdm
 
-from PythonAcademy.src.base_agent import BaseAgent
 from PythonAcademy.src.buffers import ReplayBuffer
 from PythonAcademy.src.mlp_agent import MLPAgent
-from PythonAcademy.src.snn_agent import AgentsHistoryMaps
-from PythonAcademy.src.utils import unbatch_actions
+from PythonAcademy.src.rl_academy import AgentsHistoryMaps
 from PythonAcademy.src.wrappers import TensorActionTuple
 
 
