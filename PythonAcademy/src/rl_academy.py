@@ -330,7 +330,8 @@ class RLAcademy:
 				self.training_histories: TrainingHistoriesMap = checkpoint[CheckpointManager.CHECKPOINT_TRAINING_HISTORY_KEY]
 				temp_curriculum = self.curriculum
 				self.curriculum = self.training_histories.curriculum
-				self.curriculum.update_teachers_and_channels(temp_curriculum)
+				if temp_curriculum is not None:
+					self.curriculum.update_teachers_and_channels(temp_curriculum)
 				self.plot_training_history(show=False)
 			except FileNotFoundError as e:
 				if self.verbose:
