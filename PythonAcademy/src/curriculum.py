@@ -163,6 +163,18 @@ class Curriculum:
 	def channels(self):
 		return [lesson.channel for lesson in self._lessons]
 
+	@property
+	def lessons(self):
+		return self._lessons
+
+	def __getitem__(self, item) -> Lesson:
+		if isinstance(item, int):
+			return self._lessons[item]
+		elif isinstance(item, str):
+			return next(filter(lambda l: l.name == item, self._lessons))
+		else:
+			raise TypeError(f"Invalid type for curriculum indexing: {type(item)}")
+
 	def add_lesson(self, lesson: Lesson):
 		self._lessons.append(lesson)
 
