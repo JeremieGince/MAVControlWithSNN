@@ -1,25 +1,20 @@
-import json
-import os
-import shutil
-import warnings
-from copy import deepcopy
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
+# Code fork from https://github.com/JeremieGince/SNNImageClassification
+# authors: Jeremie Gince, Remi Lamontagne-Caron
+
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Type, Union
 
 import numpy as np
 import torch
-from mlagents_envs.base_env import ActionTuple, BaseEnv, BehaviorSpec, DecisionSteps, DimensionProperty, TerminalSteps
+from mlagents_envs.base_env import ActionTuple, BehaviorSpec, DimensionProperty
 from mlagents_envs.environment import UnityEnvironment
 from torch import Tensor, nn
 from torchvision.transforms import Compose, Lambda
-from tqdm.auto import tqdm
 
 from PythonAcademy.src.base_agent import BaseAgent
-from PythonAcademy.src.buffers import BatchExperience, Experience, ReplayBuffer
-from PythonAcademy.src.curriculum import Curriculum
-from PythonAcademy.src.rl_academy import AgentsHistoryMaps, LoadCheckpointMode
+from PythonAcademy.src.rl_academy import LoadCheckpointMode
 from PythonAcademy.src.spike_funcs import HeavisideSigmoidApprox, SpikeFuncType, SpikeFuncType2Func, SpikeFunction
 from PythonAcademy.src.spiking_layers import ALIFLayer, LIFLayer, LayerType, LayerType2Layer, ReadoutLayer
-from PythonAcademy.src.utils import TrainingHistory, linear_decay, mapping_update_recursively, to_tensor
+from PythonAcademy.src.utils import to_tensor
 from PythonAcademy.src.wrappers import TensorActionTuple
 
 
@@ -326,45 +321,3 @@ class SNNAgent(BaseAgent):
 		return actions
 
 
-if __name__ == '__main__':
-	# mlagents-learn config/Landing_wo_demo.yaml --run-id=eventCamLanding --resume
-	from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
-
-	build_path = "../MAVControlWithSNN/Builds/MAVControlWithSNN.exe"
-	integration_time = 100
-
-	channel = EnvironmentParametersChannel()
-	env = UnityEnvironment(file_name=build_path, seed=42, side_channels=[channel], no_graphics=True)
-	channel.set_float_parameter("batchSize", 4)
-	channel.set_float_parameter("camFollowTargetAgent", False)
-	channel.set_float_parameter("droneMaxStartY", 1.1)
-	channel.set_float_parameter("observationStacks", integration_time)
-	channel.set_float_parameter("observationWidth", 28)
-	channel.set_float_parameter("observationHeight", 28)
-	env.reset()
-	snn = SNNAgent(
-		spec=env.behavior_specs[list(env.behavior_specs)[0]],
-		behavior_name=list(env.behavior_specs)[0].split("?")[0],
-		n_hidden_neurons=256,
-		int_time_steps=integration_time,
-		input_transform=[
-			Compose([
-				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
-				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
-				Lambda(lambda t: torch.flatten(t, start_dim=1))
-			]),
-			Compose([
-				Lambda(lambda a: torch.from_numpy(a)),
-			])
-		]
-	)
-	hist = snn.fit(
-		env,
-		n_iterations=int(1e4),
-		verbose=True,
-		load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
-		# force_overwrite=True,
-	)
-	# _, hist = snn.generate_trajectories(env, 1024, 0.0, verbose=True)
-	# env.close()
-	hist.plot(show=True, figsize=(10, 6))
