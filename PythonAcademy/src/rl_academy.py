@@ -300,13 +300,13 @@ class RLAcademy:
 
 	def plot_training_history(self, training_history: TrainingHistory = None, show: bool = False) -> str:
 		if training_history is None:
-			training_history = self.training_histories.report_history
+			training_history = self.training_histories
 		save_path = f"./{self.checkpoint_folder}/training_history.png"
 		os.makedirs(f"./{self.checkpoint_folder}/", exist_ok=True)
-		training_history.plot(save_path, show)
+		training_history.plot(save_path=save_path, show=show)
 		return save_path
 
-	def _check_and_load_state_from_academy_checkpoint(
+	def check_and_load_state_from_academy_checkpoint(
 			self,
 			load_checkpoint_mode: LoadCheckpointMode = None,
 			force_overwrite: bool = False,
@@ -332,8 +332,9 @@ class RLAcademy:
 				self.curriculum = self.training_histories.curriculum
 				self.curriculum.update_teachers_and_channels(temp_curriculum)
 				self.plot_training_history(show=False)
-			except FileNotFoundError:
+			except FileNotFoundError as e:
 				if self.verbose:
+					warnings.warn(f"Error: {e}", Warning)
 					warnings.warn("No such checkpoint. Fit from beginning.")
 		return start_itr
 
@@ -368,7 +369,7 @@ class RLAcademy:
 		self._update_optimizer_()
 
 		start_time = time.time()
-		start_itr = self._check_and_load_state_from_academy_checkpoint(load_checkpoint_mode, force_overwrite)
+		start_itr = self.check_and_load_state_from_academy_checkpoint(load_checkpoint_mode, force_overwrite)
 		best_rewards = self.training_histories.max("Rewards")
 		best_saved_rewards = best_rewards
 		buffer = self._init_train_buffer()
@@ -625,3 +626,6 @@ class RLAcademy:
 		policy_loss.backward()
 		self.policy_optimizer.step()
 		return policy_loss.detach().cpu().numpy().item()
+
+	def close(self):
+		self.env.close()
