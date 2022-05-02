@@ -194,6 +194,8 @@ class ALIFLayer(LIFLayer):
 			**kwargs
 		)
 		self.beta = torch.tensor(self.kwargs["beta"], dtype=torch.float32, device=self.device)
+		if self.kwargs["learn_beta"]:
+			self.beta = torch.nn.Parameter(self.beta, requires_grad=True)
 		self.rho = torch.tensor(np.exp(-dt / self.kwargs["tau_a"]), dtype=torch.float32, device=self.device)
 
 	def _set_default_kwargs(self):
@@ -205,6 +207,7 @@ class ALIFLayer(LIFLayer):
 			self.kwargs.setdefault("gamma", 100.0)
 		else:
 			self.kwargs.setdefault("gamma", 0.3)
+		self.kwargs.setdefault("learn_beta", False)
 
 	def create_empty_state(self, batch_size: int = 1) -> Tuple[torch.Tensor, ...]:
 		"""
