@@ -36,9 +36,23 @@ class BaseAgent(torch.nn.Module):
 		if input_transform is None:
 			input_transform = self.get_default_transform()
 		if isinstance(input_transform, list):
+			default_transform = self.get_default_transform()
+			if len(input_transform) < len(self.input_sizes):
+				for i in range(len(input_transform), len(self.input_sizes)):
+					input_transform.append(default_transform[list(self.input_sizes.keys())[i]])
 			input_transform = {in_name: t for in_name, t in zip(self.input_sizes, input_transform)}
 		self.input_transform: Dict[str, Callable] = input_transform
 		self._add_to_device_transform_()
+
+	@property
+	def input_sizes(self) -> Dict[str, int]:
+		return {
+			obs.name: np.prod([
+				d
+				for d, d_type in zip(obs.shape, obs.dimension_property)
+			], dtype=int)
+			for obs in self.spec.observation_specs
+		}
 
 	@property
 	def checkpoints_meta_path(self) -> str:
