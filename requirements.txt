@@ -1,6 +1,8 @@
 matplotlib==3.5.1
 mlagents_envs==0.27.0
 numpy==1.22.2
+opencv_python==4.5.5.64
+Pillow==9.1.0
 torch==1.11.0+cu113
 torchvision==0.12.0+cu113
 tqdm==4.64.0
