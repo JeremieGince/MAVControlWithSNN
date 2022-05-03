@@ -1,6 +1,7 @@
 # MAVControlWithSNN
 
-Disclaimer: **Project currently under development**
+Disclaimer: **Project currently under development**. Project done for the course "Introduction à la 
+robotique mobile" (GLO-7021) of Université Laval, Québec.
 
 ## Abstract
 
