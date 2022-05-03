@@ -22,6 +22,7 @@ def get_env_parameters(int_time: int):
 	return dict(
 		n_agents=16,
 		camFollowTargetAgent=False,
+		droneMinStartY=1.0,
 		droneMaxStartY=2.5,
 		observationStacks=int_time,
 		observationWidth=8,
@@ -29,7 +30,7 @@ def get_env_parameters(int_time: int):
 		enableNeuromorphicCamera=True,
 		enableCamera=False,
 		usePositionAsInput=False,
-		enableTorque=False,
+		enableTorque=True,
 		enableDisplacement=False,
 		useRotationAsInput=False,
 		useVelocityAsInput=False,
@@ -87,6 +88,7 @@ def create_curriculum(channel, n_lessons: int = 50, teacher=None):
 			teacher_strength=0.5**(less_idx+1) if y <= 2.5 else None,
 		)
 		for less_idx, y in enumerate(y_space)
+		if y <= 3.0
 	]
 	return Curriculum(lessons=lessons)
 
@@ -103,7 +105,7 @@ def setup_environment(integration_time):
 		no_graphics=False
 	)
 	engine_config_channel.set_configuration(EngineConfig(
-		width=512, height=256, quality_level=1, time_scale=20.0, target_frame_rate=-1, capture_frame_rate=60
+		width=726, height=512, quality_level=1, time_scale=20.0, target_frame_rate=-1, capture_frame_rate=60
 	))
 	env_params = get_env_parameters(integration_time)
 	sent_params = send_parameter_to_channel(params_channel, env_params)
@@ -119,16 +121,17 @@ def train_agent(env, integration_time, channels, env_params):
 		behavior_name=list(env.behavior_specs)[0].split("?")[0],
 		# n_hidden_neurons=128,
 		# n_hidden_neurons=[10, 5],
-		# n_hidden_neurons=[64, 64],
+		n_hidden_neurons=[64, 8],
 		# n_hidden_neurons=[128, 128],
 		# n_hidden_neurons=[32, 16],
-		n_hidden_neurons=[16, 8],
+		# n_hidden_neurons=[16, 8],
 		int_time_steps=integration_time,
 		input_transform=get_input_transforms(env_params),
 		use_recurrent_connection=False,
 		hidden_layer_type=ALIFLayer,
 		# hidden_layer_type=LIFLayer,
 		# name="snn",
+		# learn_beta=True,
 	)
 	print(f"Training device: {snn.device}")
 	print(f"Training agent {snn.name} on the behavior {snn.behavior_name}.")
@@ -143,23 +146,32 @@ def train_agent(env, integration_time, channels, env_params):
 			channels["params_channel"],
 			# teacher=h,
 		),
-		# checkpoint_folder=f"checkpoints-lif128-Input_divH-pbuffer",
-		# checkpoint_folder="checkpoints-alif128-Input_divH-pbuffer",
-		# checkpoint_folder="checkpoints-alif10x5-Input_divH-pbuffer",
-		# checkpoint_folder="checkpoints-lif10x5-Input_divH-pbuffer",
-		# checkpoint_folder="checkpoints-alif64x64-Input_eventCam-pbuffer",
-		# checkpoint_folder="checkpoints-alif128x128-Input_eventCam-pbuffer",
-		# checkpoint_folder="checkpoints-alif32x16-Input_eventCam8x8-pbuffer",
-		# checkpoint_folder="checkpoints-alif32x16-Input_eventCam8x8_divH-pbuffer",
-		checkpoint_folder="checkpoints-alif16x8-Input_eventCam8x8_divH-pbuffer",
+		# checkpoint_folder=f"tr_data/checkpoints-lif128-Input_divH-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-alif128-Input_divH-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-alif10x5-Input_divH-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-lif10x5-Input_divH",
+		# checkpoint_folder="tr_data/checkpoints-lif64x8-Input_eventCam8x8",
+		# checkpoint_folder="tr_data/checkpoints-lif64x8-Input_eventCam8x8-Out4",
+		# checkpoint_folder="tr_data/checkpoints-lif64x8-Input_eventCam8x8_divH-Out4",
+		# checkpoint_folder="tr_data/checkpoints-alif64x8-Input_eventCam8x8_divH",
+		# checkpoint_folder="tr_data/checkpoints-alif16x8-Input_eventCam8x8_divH-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-alif16x8-Input_eventCam8x8_divH-pbuffer-learn_beta",
+		# checkpoint_folder="tr_data/checkpoints-alif16x8-Input_eventCam8x8_divH",
+		# checkpoint_folder="tr_data/checkpoints-alif16x8-Input_divH-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-alif16x8-Input_eventCam8x8_divH-pbuffer-learn_beta-env_torque",
+		# checkpoint_folder="tr_data/checkpoints-alif32x16-Input_eventCam8x8_divH-pbuffer-learn_beta-env_torque",
+		# checkpoint_folder="tr_data/checkpoints-alif64x8-Input_eventCam8x8-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-alif64x8-Input_eventCam8x8_divH",
+		# checkpoint_folder="tr_data/checkpoints-alif64x8-Input_eventCam8x8-Out4",
+		checkpoint_folder="tr_data/checkpoints-lif64x8-Input_eventCam8x8_divH-Out4",
 	)
 	hist = academy.train(
 		n_iterations=int(1e3),
 		load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
 		# force_overwrite=True,
-		save_freq=100,
+		save_freq=10,
 		use_priority_buffer=True,
-		max_seconds=5 * 60 * 60,
+		max_seconds=1 * 60 * 60,
 	)
 	# hist.plot(show=True, figsize=(10, 6))
 
