@@ -16,3 +16,16 @@ From Assets Store
 
 
 
+
+# Citation
+```
+@article{Gince_MAVControlWithSNN_2022,
+  title={MAV Control With SNN},
+  author={Gince, Jérémie},
+  year={2022},
+  publisher={Université Laval},
+  url={https://github.com/JeremieGince/MAVControlWithSNN},
+}
+```
+
+
