@@ -45,7 +45,7 @@ The event camera placed on the front of the MAV is used to detect the variation 
 ## Neural dynamics
 The neural dynamics used in this project are *Leaky-Integrate-and-Fire* (LIF) and *Adaptive-Leaky-Integrate-and-Fire* 
 (ALIF). Those dynamics are implemented and come from the following project: 
-- [SNNImageClassification](https://github.com/JeremieGince/SNNImageClassification).
+- [Classification of MNIST and Fashion-MNIST images using SNNs](https://github.com/JeremieGince/SNNImageClassification).
 
 
 
