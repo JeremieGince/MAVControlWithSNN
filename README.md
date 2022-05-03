@@ -16,7 +16,6 @@ continuation of the project.
 
 
 ## Environment
-
 The MAV used in this project is a quadrotor with a event camera attached to the front and a optical flow camera 
 attached on the belly.
 <p align="center"> <img width="900" height="400" src="https://github.com/JeremieGince/MAVControlWithSNN/blob/main/figures/env_mav.png?raw=true"> </p>
@@ -33,20 +32,25 @@ Finally, the environment looks like this:
 
 
 ## Sensors
-
 The event camera placed on the front of the MAV is used to detect the variation of intensity in the scene.
 <p align="center"> <img width="900" height="400" src="https://github.com/JeremieGince/MAVControlWithSNN/blob/main/figures/MAV_eventCam_showcase.png?raw=true"> </p>
 
 
-## Training 
 
+## Neural dynamics
+The neural dynamics used in this project are *Leaky-Integrate-and-Fire* (LIF) and *Adaptive-Leaky-Integrate-and-Fire* 
+(ALIF). Those dynamics are implemented and come from the following project: 
+- [SNNImageClassification](https://github.com/JeremieGince/SNNImageClassification).
+
+
+
+## Training
 The pipeline for training the neural network is as follows:
 <p align="center"> <img width="900" height="400" src="https://github.com/JeremieGince/MAVControlWithSNN/blob/main/figures/training_pipeline.png?raw=true"> </p>
 
 
 
 ## Results
-
 The results of the training with one degree of freedom are as follows:
 
 | Model       | Inputs          | Mean Rewards | Std Rewards |
@@ -85,7 +89,8 @@ From Assets Store
 - OpenCvSharp+Unity
 
 
-
+# License
+[Apache License 2.0](LICENSE.md)
 
 
 # Citation
