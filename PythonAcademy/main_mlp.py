@@ -17,17 +17,17 @@ from PythonAcademy.src.utils import send_parameter_to_channel, threshold_image, 
 
 def get_env_parameters(int_time: int):
 	return dict(
-		n_agents=8,
+		n_agents=16,
 		camFollowTargetAgent=False,
 		droneMaxStartY=2.5,
 		observationStacks=int_time,
-		observationWidth=28,
-		observationHeight=28,
-		enableNeuromorphicCamera=False,
+		observationWidth=8,
+		observationHeight=8,
+		enableNeuromorphicCamera=True,
 		enableCamera=False,
-		usePositionAsInput=False,
-		enableTorque=False,
+		enableTorque=True,
 		enableDisplacement=False,
+		usePositionAsInput=False,
 		useRotationAsInput=False,
 		useVelocityAsInput=False,
 		useAngularVelocityAsInput=False,
@@ -39,25 +39,6 @@ def get_env_parameters(int_time: int):
 		droneDrag=5.0,
 		droneAngularDrag=7.0,
 	)
-
-
-def get_input_transforms(parameters: Dict[str, Any]):
-	input_transform = []
-	if np.isclose(float(parameters.get("enableNeuromorphicCamera", False)), 1.0):
-		input_transform.append(
-			Compose([
-				Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
-				threshold_image,
-				Lambda(lambda t: torch.permute(t, (2, 0, 1))),
-				Lambda(lambda t: torch.flatten(t, start_dim=1))
-			])
-		)
-	input_transform.append(
-		Compose([
-			Lambda(lambda a: to_tensor(a, dtype=torch.float32)),
-		])
-	)
-	return input_transform
 
 
 def create_curriculum(channel, n_lessons: int = 50, teacher=None):
@@ -84,6 +65,7 @@ def create_curriculum(channel, n_lessons: int = 50, teacher=None):
 			teacher_strength=0.5**(less_idx+1) if y <= 2.5 else None,
 		)
 		for less_idx, y in enumerate(y_space)
+		if y <= 3.0
 	]
 	return Curriculum(lessons=lessons)
 
@@ -114,9 +96,9 @@ def train_agent(env, integration_time, channels, env_params):
 	mlp = MLPAgent(
 		spec=env.behavior_specs[list(env.behavior_specs)[0]],
 		behavior_name=list(env.behavior_specs)[0].split("?")[0],
-		input_transform=get_input_transforms(env_params),
-		# n_hidden_neurons=[128, 128],
-		n_hidden_neurons=[10, 5],
+		n_hidden_neurons=[128, 128],
+		# n_hidden_neurons=[10, 5],
+		# n_hidden_neurons=[64, 16],
 	)
 	print(f"Training device: {mlp.device}")
 	print(f"Training agent {mlp.name} on the behavior {mlp.behavior_name}.")
@@ -129,13 +111,22 @@ def train_agent(env, integration_time, channels, env_params):
 			channels["params_channel"],
 		),
 		# checkpoint_folder="checkpoints-mlp128x128-Input_divH-pbuffer",
-		checkpoint_folder="checkpoints-mlp10x5-Input_divH-pbuffer",
+		# checkpoint_folder="checkpoints-mlp10x5-Input_divH-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_posV_angV_div-env_torque-pbuffer",
+		# checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_pos",
+		# checkpoint_folder="tr_data/checkpoints-mlp10x5-Input_div",
+		# checkpoint_folder="tr_data/checkpoints-mlp64x16-Input_pos",
+		# checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_eventCam8x8",
+		# checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_eventCam8x8-Out4",
+		# checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_eventCam8x8_divH",
+		# checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_posV_angV-Out4",
+		checkpoint_folder="tr_data/checkpoints-mlp128x128-Input_eventCam8x8_divH-Out4",
 	)
 	hist = academy.train(
 		n_iterations=int(1e3),
-		# load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
-		force_overwrite=True,
-		save_freq=100,
+		load_checkpoint_mode=LoadCheckpointMode.LAST_ITR,
+		# force_overwrite=True,
+		save_freq=10,
 		use_priority_buffer=True,
 		max_seconds=1*60*60,
 	)
