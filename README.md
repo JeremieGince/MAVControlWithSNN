@@ -1,5 +1,9 @@
 # MAVControlWithSNN
 
+Disclaimer: **Project currently under development**
+
+## Abstract
+
 In this project, neural dynamics *Leaky-Integrate-and-Fire* (LIF) and 
 *Adaptive-Leaky-Integrate-and-Fire* (ALIF) from neuroscience are compared 
 with a multilayer perceptron (MLP) from machine learning on a control task. The 
