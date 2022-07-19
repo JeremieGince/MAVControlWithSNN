@@ -703,10 +703,6 @@ sysinfo.txt
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
-!/[Aa]ssets/**/*.meta
-!*.*.meta
-!*.prefab.meta
-
 ### venv ###
 # Virtualenv
 # http://iamzed.com/2009/05/07/a-primer-on-virtualenv/
@@ -1134,3 +1130,7 @@ FodyWeavers.xsd
 [dD]emonstrations
 !*.cs
 
+# add meta data for Unity
+!/[Aa]ssets/**/*.meta
+!*.*.meta
+!*.prefab.meta

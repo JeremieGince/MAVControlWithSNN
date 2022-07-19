@@ -703,9 +703,6 @@ sysinfo.txt
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
-!/[Aa]ssets/**/*.meta
-!*.*.meta
-!*.prefab.meta
 
 
 ### venv ###
@@ -1135,3 +1132,11 @@ FodyWeavers.xsd
 [dD]emonstrations
 [cC]heckpoints*
 *.pth
+
+
+
+# add meta data for Unity
+!/[Aa]ssets/**/*.meta
+!*.*.meta
+!*.prefab.meta
+
