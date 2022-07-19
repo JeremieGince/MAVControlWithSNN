@@ -704,6 +704,7 @@ sysinfo.txt
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
 !/[Aa]ssets/**/*.meta
+!*.*.meta
 !*.prefab.meta
 
 ### venv ###
