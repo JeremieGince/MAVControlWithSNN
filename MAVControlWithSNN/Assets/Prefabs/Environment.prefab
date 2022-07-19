@@ -83,7 +83,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d73af24332bf29b43a80f7b91bacbc06, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  density: 0.01
+  density: 0.015
   markersMinMaxX: {x: -15, y: 15}
   markersMinMaxY: {x: 0, y: 10}
   markersMinMaxZ: {x: -3, y: 5}
