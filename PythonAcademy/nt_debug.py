@@ -14,11 +14,11 @@ from neurotorch.callbacks.early_stopping import EarlyStoppingThreshold
 from neurotorch.rl.utils import space_to_continuous_shape
 from torchvision.transforms import Compose, Lambda
 
-from PythonAcademy.neurotorch_fixes import RLAcademy
+from PythonAcademy.neurotorch_fixes import RLAcademy, PPO
 from PythonAcademy.src.utils import send_parameter_to_channel, threshold_image
 
 
-class UnityWrapperToGymnesiumWrapper(gym.Wrapper):
+class UnityWrapperToGymnasiumWrapper(gym.Wrapper):
 	def __init__(self, env, observation_specs):
 		super().__init__(env)
 		self._env = env
@@ -105,7 +105,7 @@ def get_input_transforms(parameters: Dict[str, Any]):
 			Compose([
 				Lambda(lambda a: nt.to_tensor(a, dtype=torch.float32)),
 				threshold_image,
-				Lambda(lambda t: torch.permute(t, (3, 0, 1, 2))),
+				Lambda(lambda t: torch.permute(t, (0, 3, 1, 2))),
 				Lambda(lambda t: torch.flatten(t, start_dim=2))
 			])
 		)
@@ -113,7 +113,7 @@ def get_input_transforms(parameters: Dict[str, Any]):
 		input_transform.append(
 			Compose([
 				Lambda(lambda a: nt.to_tensor(a, dtype=torch.float32)),
-				Lambda(lambda t: torch.permute(t, (3, 0, 1, 2))),
+				Lambda(lambda t: torch.permute(t, (0, 3, 1, 2))),
 				Lambda(lambda t: torch.flatten(t, start_dim=2))
 			])
 		)
@@ -131,7 +131,7 @@ if __name__ == '__main__':
 		n_stack_input=10,
 	)
 	env_id = list(unity_env.behavior_specs)[0].split("?")[0]
-	env = UnityWrapperToGymnesiumWrapper(
+	env = UnityWrapperToGymnasiumWrapper(
 		UnityToGymWrapper(unity_env, uint8_visual=False, flatten_branched=False, allow_multiple_obs=True),
 		unity_env.behavior_specs[list(unity_env.behavior_specs)[0]].observation_specs
 	)
@@ -143,7 +143,7 @@ if __name__ == '__main__':
 	n_hidden_units = 128
 	n_critic_hidden_units = 128
 	last_k_rewards = 100
-	n_iterations = int(1e4)
+	n_iterations = int(1e5)
 	n_epochs = 10
 	n_new_trajectories = env_params["n_agents"]
 	
@@ -174,7 +174,7 @@ if __name__ == '__main__':
 		],
 	).build()
 	
-	ppo_la = nt.rl.PPO(
+	ppo_la = PPO(
 		critic_criterion=torch.nn.SmoothL1Loss(),
 	)
 	
@@ -209,6 +209,7 @@ if __name__ == '__main__':
 			]
 		).build(),
 		checkpoint_folder=f"data/tr_data/ckps_{env_id}_snn-policy",
+		continuous_action_variances_decay=1 - (0.1 / n_iterations),
 	)
 	
 	checkpoint_manager = nt.CheckpointManager(
@@ -238,8 +239,9 @@ if __name__ == '__main__':
 		n_batches=-1,
 		n_new_trajectories=n_new_trajectories,
 		batch_size=4096,
-		buffer_size=np.inf,
-		clear_buffer=True,
+		buffer_size=int(1e5),
+		clear_buffer=False,
+		use_priority_buffer=True,
 		randomize_buffer=True,
 		load_checkpoint_mode=nt.LoadCheckpointMode.LAST_ITR,
 		force_overwrite=False,
