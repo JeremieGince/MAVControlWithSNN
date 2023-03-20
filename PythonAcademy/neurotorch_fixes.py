@@ -1,15 +1,18 @@
 from collections import defaultdict
 from copy import deepcopy
-from typing import Tuple, Optional, Any, List, Dict
+from typing import Tuple, Optional, Any, List, Dict, Iterator, Iterable
 
 import gym
 import numpy as np
-from neurotorch import to_numpy
+import torch
+from neurotorch import to_numpy, to_tensor, ToDevice
 from neurotorch.rl.rl_academy import GenTrajectoriesOutput
 from neurotorch.rl.utils import env_batch_reset as nt_env_batch_reset, batch_numpy_actions, env_batch_render
 from neurotorch.rl import RLAcademy as nt_RLAcademy, Trajectory, Experience
-from neurotorch.rl import ReplayBuffer
+from neurotorch.rl import ReplayBuffer as nt_ReplayBuffer
 from neurotorch.rl.rl_academy import AgentsHistoryMaps as nt_AgentsHistoryMaps
+from neurotorch.rl.buffers import BatchExperience as nt_BatchExperience
+from neurotorch.rl import PPO as nt_PPO
 from tqdm import tqdm
 
 
@@ -79,6 +82,82 @@ def env_batch_reset(env: gym.Env) -> Tuple[np.ndarray, np.ndarray]:
 	return observations, infos
 
 
+class BatchExperience(nt_BatchExperience):
+	def __init__(
+			self,
+			batch: List[Experience],
+			device: torch.device = torch.device("cpu"),
+	):
+		"""
+		An object that contains a batch of experiences as tensors.
+
+		:param batch: A list of Experience objects.
+		:param device: The device to use for the tensors.
+		"""
+		batch = deepcopy(batch)
+		self._batch = batch
+		self._device = device
+		self._to = ToDevice(device=device)
+
+		self.obs: List[torch.Tensor] = self._make_obs_batch(batch)
+		self.rewards: torch.Tensor = self._make_rewards_batch(batch)
+		self.terminals: torch.Tensor = self._make_terminals_batch(batch)
+		self.actions = self._make_actions_batch(batch)
+		self.next_obs: List[torch.Tensor] = self._make_next_obs_batch(batch)
+		self.others: List[dict] = [ex.others for ex in batch]
+	
+	def _make_obs_batch(self, batch: List[Experience]) -> List[torch.Tensor]:
+		as_dict = isinstance(batch[0].obs, dict)
+		# [{k: x.shape for k, x in exp.obs.items()} for exp in batch]
+		if as_dict:
+			obs = {
+				key: torch.stack([to_tensor(ex.obs[key]) for ex in batch])
+				for key in batch[0].obs
+			}
+			return self._to(obs)
+		return self._to(torch.stack([to_tensor(ex.obs) for ex in batch]))
+	
+	def _make_next_obs_batch(self, batch: List[Experience]) -> List[torch.Tensor]:
+		as_dict = isinstance(batch[0].next_obs, dict)
+		if as_dict:
+			obs = {
+				key: torch.stack([to_tensor(ex.next_obs[key]) for ex in batch])
+				for key in batch[0].next_obs
+			}
+			return self._to(obs)
+		return self._to(torch.stack([to_tensor(ex.next_obs) for ex in batch]))
+	
+	def _make_actions_batch(self, batch: List[Experience]) -> torch.Tensor:
+		as_dict = isinstance(batch[0].action, dict)
+		if as_dict:
+			action = {
+				key: torch.stack([to_tensor(ex.action[key]) for ex in batch])
+				for key in batch[0].action
+			}
+			return self._to(action)
+		return self._to(torch.stack([to_tensor(ex.action) for ex in batch]))
+
+
+class ReplayBuffer(nt_ReplayBuffer):
+	def extend(self, iterable: Iterable[Experience]):
+		_ = [self.store(e) for e in iterable]
+		return self
+	
+	def store(self, element: Experience):
+		"""
+		Stores an element. If the replay buffer is already full, deletes the oldest
+		element to make space.
+		"""
+		if len(self.data) >= self.__capacity:
+			if self.use_priority:
+				self.data.pop(np.argmin([np.abs(getattr(e, self.priority_key, 0.0)) for e in self.data]))
+			else:
+				self.data.pop(0)
+		self.data.append(deepcopy(element))
+		if self._counter_is_started:
+			self._counter += 1
+
+
 class AgentsHistoryMaps(nt_AgentsHistoryMaps):
 	def update_trajectories_(
 			self,
@@ -128,14 +207,14 @@ class AgentsHistoryMaps(nt_AgentsHistoryMaps):
 						terminal=terminals[i],
 						action=get_item_from_batch(actions, i),
 						next_obs=get_item_from_batch(next_observations, i),
-						others=others[i],
+						others=get_item_from_batch(others, i),
 					)
 				)
 				self.cumulative_rewards[i].append(self.trajectories[i].cumulative_reward)
 				self.terminal_rewards[i] = self.trajectories[i].terminal_reward
 				finished_trajectory = self.trajectories.pop(i)
 				finished_trajectories.append(finished_trajectory)
-				self.buffer.extend(finished_trajectory)
+				# self.buffer.extend(finished_trajectory)
 				self._terminal_counter += 1
 				self._experience_counter += 1
 			else:
@@ -146,11 +225,53 @@ class AgentsHistoryMaps(nt_AgentsHistoryMaps):
 						terminal=terminals[i],
 						action=get_item_from_batch(actions, i),
 						next_obs=get_item_from_batch(next_observations, i),
-						others=others[i],
+						others=get_item_from_batch(others, i),
 					)
 				)
 				self._experience_counter += 1
 		return finished_trajectories
+	
+	def propagate_and_get_all(self) -> List[Trajectory]:
+		"""
+		Propagate all the trajectories and return all the trajectories.
+
+		:return: All the trajectories
+		:rtype: List[Trajectory]
+		"""
+		trajectories = []
+		for i in range(len(self.trajectories)):
+			if not self.trajectories[i].propagated:
+				self.trajectories[i].propagate()
+			if self.trajectories[i].terminated:
+				self.cumulative_rewards[i].append(self.trajectories[i].cumulative_reward)
+				trajectory = self.trajectories.pop(i)
+				self._terminal_counter += 1
+			else:
+				trajectory = self.trajectories[i]
+			trajectories.append(trajectory)
+			# self.buffer.extend(trajectory)
+		return trajectories
+	
+	def propagate_all(self) -> List[Trajectory]:
+		"""
+		Propagate all the trajectories and return the finished ones.
+
+		:return: All the trajectories.
+		:rtype: List[Trajectory]
+		"""
+		trajectories = []
+		for i in range(len(self.trajectories)):
+			if not self.trajectories[i].propagated:
+				self.trajectories[i].propagate()
+			if self.trajectories[i].terminated:
+				self.cumulative_rewards[i].append(self.trajectories[i].cumulative_reward)
+				trajectory = self.trajectories.pop(i)
+				trajectories.append(trajectory)
+				self._terminal_counter += 1
+			else:
+				trajectory = self.trajectories[i]
+			# self.buffer.extend(trajectory)
+		return trajectories
 	
 	def clear(self) -> List[Trajectory]:
 		trajectories = self.propagate_and_get_all()
@@ -230,7 +351,8 @@ class RLAcademy(nt_RLAcademy):
 		re_trajectories = kwargs.get("re_trajectories", False)
 		re_trajectories_list = []
 		agents_history_maps = AgentsHistoryMaps(
-			buffer, normalize_rewards=self.kwargs["normalize_rewards"], **self._agents_history_maps_meta
+			# buffer,
+			normalize_rewards=self.kwargs["normalize_rewards"], **self._agents_history_maps_meta
 		)
 		# terminal_rewards: List[float] = []
 		p_bar = tqdm(
@@ -269,7 +391,7 @@ class RLAcademy(nt_RLAcademy):
 			if all(terminals):
 				finished_trajectories.extend(agents_history_maps.propagate_all())
 				next_observations, info = env_batch_reset(self.env)
-			self._update_gen_trajectories_finished_trajectories(finished_trajectories)
+			self._update_gen_trajectories_finished_trajectories(finished_trajectories, buffer)
 			if re_trajectories:
 				re_trajectories_list.extend(finished_trajectories)
 			if n_trajectories is None:
@@ -281,7 +403,7 @@ class RLAcademy(nt_RLAcademy):
 				# terminal_rewards=f"{np.nanmean(terminal_rewards) if terminal_rewards else 0.0:.3f}",
 			)
 			observations = next_observations
-		self._update_gen_trajectories_finished_trajectories(agents_history_maps.propagate_and_get_all())
+		self._update_gen_trajectories_finished_trajectories(agents_history_maps.propagate_and_get_all(), buffer)
 		self._update_agents_history_maps_meta(agents_history_maps)
 		self.update_objects_state_(observations=observations, info=info, buffer=buffer)
 		self.update_itr_metrics_state_(
@@ -297,6 +419,42 @@ class RLAcademy(nt_RLAcademy):
 			agents_history_maps=agents_history_maps,
 			trajectories=re_trajectories_list,
 		)
+	
+	def _update_gen_trajectories_finished_trajectories(
+			self,
+			finished_trajectories: List[Trajectory],
+			buffer: Optional[ReplayBuffer] = None,
+	):
+		if buffer is None:
+			buffer = self.state.objects.get("buffer", None)
+		for trajectory in finished_trajectories:
+			if not trajectory.is_empty():
+				trajectory_others_list = self.callbacks.on_trajectory_end(self, trajectory)
+				if trajectory_others_list is not None:
+					trajectory.update_others(trajectory_others_list)
+				if buffer is not None:
+					buffer.extend(trajectory)
+		return buffer
+	
+	
+class PPO(nt_PPO):
+	def _batch_obs(self, batch: List[Experience]):
+		as_dict = isinstance(batch[0].obs, dict)
+		if as_dict:
+			obs_batched = batch[0].obs
+			for key in obs_batched:
+				obs_batched[key] = torch.stack([to_tensor(ex.obs[key]) for ex in batch]).to(self.policy.device)
+		else:
+			obs_batched = torch.stack([to_tensor(ex.obs) for ex in batch]).to(self.policy.device)
+		return obs_batched
+	
+	def _compute_values(self, trajectory):
+		obs_as_tensor = BatchExperience(trajectory).obs
+		values = self.agent.get_values(obs_as_tensor, as_numpy=True, re_as_dict=False).reshape(-1)
+		return values
+	
 
-
+nt_PPO = PPO
 nt_RLAcademy = RLAcademy
+nt_BatchExperience = BatchExperience
+nt_ReplayBuffer = ReplayBuffer
