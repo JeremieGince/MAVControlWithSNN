@@ -1,4 +1,5 @@
 import time
+from copy import deepcopy
 from typing import Dict, Any
 
 import gym
@@ -42,8 +43,8 @@ class UnityWrapperToGymnasiumWrapper(gym.Wrapper):
 		return obs, {}
 
 
-def get_env_parameters(n_stack_input: int):
-	return dict(
+def get_env_parameters(n_stack_input: int, **kwargs):
+	default_params = dict(
 		n_agents=1,
 		camFollowTargetAgent=False,
 		droneMinStartY=1.0,
@@ -67,6 +68,8 @@ def get_env_parameters(n_stack_input: int):
 		droneDrag=5.0,
 		droneAngularDrag=7.0,
 	)
+	default_params.update(kwargs)
+	return default_params
 
 
 def setup_environment(
@@ -91,7 +94,9 @@ def setup_environment(
 	env_params = get_env_parameters(n_stack_input)
 	if params is not None:
 		env_params.update(params)
-	sent_params = send_parameter_to_channel(params_channel, env_params)
+	params_to_send = deepcopy(env_params)
+	params_to_send["n_agents"] = 1
+	sent_params = send_parameter_to_channel(params_channel, params_to_send)
 	time.sleep(0.5)
 	env.reset()
 	time.sleep(0.5)
@@ -125,16 +130,49 @@ def get_input_transforms(parameters: Dict[str, Any]):
 	return input_transform
 
 
-if __name__ == '__main__':
+def make_env(output_dict: dict, input_params: Dict[str, Any] = None):
 	unity_env, channels, env_params = setup_environment(
 		build_path="../MAVControlWithSNN/Builds/MAVControlWithSNN.exe",
 		n_stack_input=10,
+		params=input_params
 	)
 	env_id = list(unity_env.behavior_specs)[0].split("?")[0]
 	env = UnityWrapperToGymnasiumWrapper(
 		UnityToGymWrapper(unity_env, uint8_visual=False, flatten_branched=False, allow_multiple_obs=True),
 		unity_env.behavior_specs[list(unity_env.behavior_specs)[0]].observation_specs
 	)
+	output_dict["env"] = env
+	output_dict["env_id"] = env_id
+	output_dict["channels"] = channels
+	output_dict["env_params"] = env_params
+	output_dict["unity_env"] = unity_env
+	return env
+
+
+if __name__ == '__main__':
+	unity_env, channels, env_params = setup_environment(
+		build_path="../MAVControlWithSNN/Builds/MAVControlWithSNN.exe",
+		n_stack_input=10,
+		params=dict(
+			enableTorque=False,
+			droneMaxStartY=2.5,
+		)
+	)
+	env_id = list(unity_env.behavior_specs)[0].split("?")[0]
+	env = UnityWrapperToGymnasiumWrapper(
+		UnityToGymWrapper(unity_env, uint8_visual=False, flatten_branched=False, allow_multiple_obs=True),
+		unity_env.behavior_specs[list(unity_env.behavior_specs)[0]].observation_specs
+	)
+	# trial_parameters = dict(
+	# 	n_agents=4,
+	# 	enableTorque=False,
+	# 	droneMaxStartY=2.5,
+	# )
+	# worker_infos = [dict() for _ in range(trial_parameters["n_agents"])]
+	# envs = gym.vector.SyncVectorEnv([
+	# 	lambda: make_env(worker_infos[i], deepcopy(trial_parameters))
+	# 	for i in range(len(worker_infos))
+	# ])
 	# continuous_obs_shape = space_to_continuous_shape(getattr(env, "single_observation_space", env.observation_space))
 	# continuous_action_shape = space_to_continuous_shape(getattr(env, "single_action_space", env.action_space))
 	continuous_obs_shape = [obs.shape for obs in env.observation_space.spaces]
@@ -143,9 +181,9 @@ if __name__ == '__main__':
 	n_hidden_units = 128
 	n_critic_hidden_units = 128
 	last_k_rewards = 100
-	n_iterations = int(1e5)
-	n_epochs = 10
-	n_new_trajectories = env_params["n_agents"]
+	n_iterations = int(1e4)
+	n_epochs = 30
+	n_new_trajectories = 100 * env_params["n_agents"]
 	
 	input_sizes = {
 		obs.name: np.prod([
@@ -160,18 +198,14 @@ if __name__ == '__main__':
 		input_transform=get_input_transforms(env_params),
 		layers=[
 			{
-				key: nt.SpyLIFLayerLPF(
+				key: nt.SpyLIFLayer(
 					int(obs_shape), n_hidden_units, use_recurrent_connection=False
 				)
 				for key, obs_shape in input_sizes.items()
 			},
 			nt.SpyLILayer(int(n_hidden_units * len(input_sizes)), continuous_action_shape[0]),
 		],
-		output_transform=[
-			(
-				nt.transforms.ReduceFuncTanh(nt.transforms.ReduceMean(dim=1))
-			)
-		],
+		output_transform=[nt.transforms.ReduceMean(dim=1)],
 	).build()
 	
 	ppo_la = PPO(
@@ -209,7 +243,7 @@ if __name__ == '__main__':
 			]
 		).build(),
 		checkpoint_folder=f"data/tr_data/ckps_{env_id}_snn-policy",
-		continuous_action_variances_decay=1 - (0.1 / n_iterations),
+		continuous_action_variances_decay=1 - (0.5 / n_iterations),
 	)
 	
 	checkpoint_manager = nt.CheckpointManager(
@@ -222,10 +256,10 @@ if __name__ == '__main__':
 	
 	early_stopping = EarlyStoppingThreshold(
 		metric=f"mean_last_{last_k_rewards}_rewards",
-		threshold=1.0,
+		threshold=0.99,
 		minimize_metric=False,
 	)
-	
+	# es_timer = nt.callbacks.early_stopping.EarlyStoppingOnTimeLimit(delta_seconds=60 * 60 * 1)  # 1 h
 	academy = RLAcademy(
 		agent=agent,
 		callbacks=[checkpoint_manager, ppo_la, early_stopping],
@@ -239,9 +273,9 @@ if __name__ == '__main__':
 		n_batches=-1,
 		n_new_trajectories=n_new_trajectories,
 		batch_size=4096,
-		buffer_size=int(1e5),
-		clear_buffer=False,
-		use_priority_buffer=True,
+		# buffer_size=int(1e4),
+		# clear_buffer=False,
+		# use_priority_buffer=True,
 		randomize_buffer=True,
 		load_checkpoint_mode=nt.LoadCheckpointMode.LAST_ITR,
 		force_overwrite=False,
